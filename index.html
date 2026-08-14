@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Todoアプリ</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <h1>Todo</h1>
+
+    <form id="todo-form" class="todo-form">
+      <input
+        type="text"
+        id="todo-input"
+        placeholder="やることを入力..."
+        autocomplete="off"
+        maxlength="200"
+      >
+      <input type="date" id="todo-due" title="期限">
+      <select id="todo-tag" title="グループ">
+        <option value="">タグなし</option>
+      </select>
+      <button type="submit">追加</button>
+    </form>
+
+    <div class="tag-manager">
+      <button type="button" id="toggle-tag-panel" class="link-btn">タグを管理 ▾</button>
+      <div id="tag-panel" class="tag-panel hidden">
+        <ul id="tag-list" class="tag-list"></ul>
+        <form id="tag-form" class="tag-form">
+          <input type="color" id="tag-color" value="#4a4de7">
+          <input type="text" id="tag-name" placeholder="新しいタグ名" maxlength="30" autocomplete="off">
+          <button type="submit">追加</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all">すべて</button>
+      <button class="filter-btn" data-filter="active">未完了</button>
+      <button class="filter-btn" data-filter="completed">完了済み</button>
+    </div>
+
+    <div class="filters secondary">
+      <select id="tag-filter">
+        <option value="all">すべてのグループ</option>
+        <option value="none">タグなし</option>
+      </select>
+      <button type="button" id="toggle-group-view" class="filter-btn">グループ表示</button>
+    </div>
+
+    <ul id="todo-list" class="todo-list"></ul>
+
+    <div class="footer">
+      <span id="items-left">0 件</span>
+      <button id="clear-completed">完了済みを削除</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
