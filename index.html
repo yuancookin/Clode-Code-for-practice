@@ -3,31 +3,260 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Todoアプリ</title>
+<title>TaskMax - 高性能タスク管理</title>
+<meta name="theme-color" content="#ad1457">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <h1>Todo</h1>
+  <a href="#main" class="skip-link">メインコンテンツへ</a>
 
-    <form id="todo-form" class="todo-form">
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">✓</span>
+      <h1>TaskMax</h1>
+    </div>
+
+    <form id="quick-add-form" class="quick-add" autocomplete="off">
       <input
         type="text"
-        id="todo-input"
-        placeholder="やることを入力..."
-        autocomplete="off"
+        id="quick-add-input"
+        placeholder="タスクを追加して Enter... (n でフォーカス)"
         maxlength="200"
+        aria-label="タスクを追加"
       >
-      <input type="date" id="todo-due" title="期限">
-      <select id="todo-tag" title="グループ">
-        <option value="">タグなし</option>
+      <select id="quick-add-priority" aria-label="優先度" title="優先度">
+        <option value="none">優先度なし</option>
+        <option value="low">低</option>
+        <option value="medium">中</option>
+        <option value="high">高</option>
       </select>
+      <input type="date" id="quick-add-due" aria-label="期限" title="期限">
       <button type="submit">追加</button>
     </form>
 
-    <div class="tag-manager">
-      <button type="button" id="toggle-tag-panel" class="link-btn">タグを管理 ▾</button>
-      <div id="tag-panel" class="tag-panel hidden">
+    <div class="header-actions">
+      <button type="button" id="btn-search" class="icon-btn" title="検索 (/)" aria-label="検索">🔍</button>
+      <button type="button" id="btn-theme" class="icon-btn" title="テーマ切替" aria-label="テーマ切替">🌓</button>
+      <button type="button" id="btn-shortcuts" class="icon-btn" title="ショートカット (?)" aria-label="ショートカット一覧">⌨</button>
+      <div class="menu-wrap">
+        <button type="button" id="btn-menu" class="icon-btn" title="メニュー" aria-label="メニュー">⋮</button>
+        <div id="menu-panel" class="menu-panel hidden">
+          <button type="button" id="btn-export">📤 エクスポート (JSON)</button>
+          <button type="button" id="btn-export-csv">📄 エクスポート (CSV)</button>
+          <button type="button" id="btn-import">📥 インポート</button>
+          <button type="button" id="btn-tags">🏷 タグ管理</button>
+          <button type="button" id="btn-notify">🔔 通知を有効化</button>
+          <input type="file" id="import-file" accept="application/json" hidden>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="view-tabs" role="tablist" aria-label="表示切替">
+    <button class="view-tab active" data-view="list" role="tab" aria-selected="true">📋 リスト</button>
+    <button class="view-tab" data-view="board" role="tab" aria-selected="false">🗂 ボード</button>
+    <button class="view-tab" data-view="calendar" role="tab" aria-selected="false">📅 カレンダー</button>
+    <button class="view-tab" data-view="stats" role="tab" aria-selected="false">📊 ダッシュボード</button>
+  </nav>
+
+  <div id="search-bar" class="search-bar hidden">
+    <input type="search" id="search-input" placeholder="タスクを検索..." aria-label="タスク検索">
+    <button type="button" id="search-close" class="icon-btn" aria-label="検索を閉じる">✕</button>
+  </div>
+
+  <main id="main" class="app-main">
+    <aside id="filter-panel" class="filter-panel">
+      <div class="filter-group">
+        <span class="filter-label">状態</span>
+        <div class="chip-row" id="filter-status">
+          <button class="chip active" data-status="all">すべて</button>
+          <button class="chip" data-status="active">未完了</button>
+          <button class="chip" data-status="done">完了</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">期限</span>
+        <div class="chip-row" id="filter-range">
+          <button class="chip active" data-range="all">すべて</button>
+          <button class="chip" data-range="today">今日</button>
+          <button class="chip" data-range="week">今週</button>
+          <button class="chip" data-range="overdue">期限切れ</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">優先度</span>
+        <div class="chip-row" id="filter-priority">
+          <button class="chip active" data-priority="all">すべて</button>
+          <button class="chip priority-high" data-priority="high">高</button>
+          <button class="chip priority-medium" data-priority="medium">中</button>
+          <button class="chip priority-low" data-priority="low">低</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">タグ</span>
+        <select id="filter-tag">
+          <option value="all">すべてのタグ</option>
+          <option value="none">タグなし</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">並び替え</span>
+        <select id="sort-by">
+          <option value="manual">手動（ドラッグ）</option>
+          <option value="due">期限順</option>
+          <option value="priority">優先度順</option>
+          <option value="created">作成日順</option>
+          <option value="alpha">名前順</option>
+        </select>
+      </div>
+      <label class="check-row">
+        <input type="checkbox" id="toggle-group-tag">
+        タグでグループ表示
+      </label>
+      <label class="check-row">
+        <input type="checkbox" id="toggle-select-mode">
+        複数選択モード
+      </label>
+      <button type="button" id="btn-clear-completed" class="link-btn danger">完了済みを削除</button>
+    </aside>
+
+    <section class="view-content">
+      <div id="bulk-toolbar" class="bulk-toolbar hidden">
+        <span id="bulk-count">0件選択中</span>
+        <button type="button" data-bulk="done">✓ 完了にする</button>
+        <button type="button" data-bulk="todo">↺ 未完了に戻す</button>
+        <select id="bulk-priority">
+          <option value="">優先度を設定...</option>
+          <option value="high">高</option>
+          <option value="medium">中</option>
+          <option value="low">低</option>
+          <option value="none">なし</option>
+        </select>
+        <button type="button" data-bulk="delete" class="danger">🗑 削除</button>
+        <button type="button" id="bulk-cancel">キャンセル</button>
+      </div>
+
+      <div id="view-list" class="view-panel">
+        <ul id="todo-list" class="todo-list"></ul>
+        <div class="footer">
+          <span id="items-left">0 件</span>
+          <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+          <span id="progress-label">0%</span>
+        </div>
+      </div>
+
+      <div id="view-board" class="view-panel hidden">
+        <div class="board" id="board-columns"></div>
+      </div>
+
+      <div id="view-calendar" class="view-panel hidden">
+        <div class="calendar-header">
+          <button type="button" id="cal-prev" class="icon-btn" aria-label="前の月">◀</button>
+          <h2 id="cal-title"></h2>
+          <button type="button" id="cal-next" class="icon-btn" aria-label="次の月">▶</button>
+          <button type="button" id="cal-today" class="link-btn">今日</button>
+        </div>
+        <div class="calendar-grid" id="calendar-grid"></div>
+      </div>
+
+      <div id="view-stats" class="view-panel hidden">
+        <div class="stats-grid" id="stats-grid"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Task detail modal -->
+  <div id="task-modal" class="modal-overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-label">
+      <div class="modal-header">
+        <h2 id="modal-title-label">タスクの詳細</h2>
+        <button type="button" id="modal-close" class="icon-btn" aria-label="閉じる">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field-label" for="field-title">タイトル</label>
+        <input type="text" id="field-title" maxlength="200">
+
+        <label class="field-label" for="field-notes">メモ</label>
+        <textarea id="field-notes" rows="3" maxlength="2000"></textarea>
+
+        <div class="field-row">
+          <div>
+            <label class="field-label" for="field-status">状態</label>
+            <select id="field-status">
+              <option value="todo">未着手</option>
+              <option value="doing">進行中</option>
+              <option value="done">完了</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="field-priority">優先度</label>
+            <select id="field-priority">
+              <option value="none">なし</option>
+              <option value="low">低</option>
+              <option value="medium">中</option>
+              <option value="high">高</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div>
+            <label class="field-label" for="field-due-date">期限日</label>
+            <input type="date" id="field-due-date">
+          </div>
+          <div>
+            <label class="field-label" for="field-due-time">期限時刻</label>
+            <input type="time" id="field-due-time">
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div>
+            <label class="field-label" for="field-recurrence">繰り返し</label>
+            <select id="field-recurrence">
+              <option value="">なし</option>
+              <option value="daily">毎日</option>
+              <option value="weekly">毎週</option>
+              <option value="monthly">毎月</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">&nbsp;</label>
+            <label class="check-row"><input type="checkbox" id="field-pinned"> ピン留め</label>
+          </div>
+        </div>
+
+        <label class="field-label">タグ</label>
+        <div id="field-tags" class="field-tags"></div>
+
+        <label class="field-label">サブタスク <span id="subtask-progress"></span></label>
+        <ul id="subtask-list" class="subtask-list"></ul>
+        <form id="subtask-form" class="subtask-form">
+          <input type="text" id="subtask-input" placeholder="サブタスクを追加..." maxlength="200">
+          <button type="submit">追加</button>
+        </form>
+
+        <p class="meta-line" id="modal-meta"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="modal-delete" class="danger">🗑 削除</button>
+        <div class="spacer"></div>
+        <button type="button" id="modal-cancel">キャンセル</button>
+        <button type="button" id="modal-save" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tag manager modal -->
+  <div id="tag-modal" class="modal-overlay hidden">
+    <div class="modal modal-sm" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>タグ管理</h2>
+        <button type="button" id="tag-modal-close" class="icon-btn" aria-label="閉じる">✕</button>
+      </div>
+      <div class="modal-body">
         <ul id="tag-list" class="tag-list"></ul>
         <form id="tag-form" class="tag-form">
           <input type="color" id="tag-color" value="#4a4de7">
@@ -36,29 +265,35 @@
         </form>
       </div>
     </div>
+  </div>
 
-    <div class="filters">
-      <button class="filter-btn active" data-filter="all">すべて</button>
-      <button class="filter-btn" data-filter="active">未完了</button>
-      <button class="filter-btn" data-filter="completed">完了済み</button>
-    </div>
-
-    <div class="filters secondary">
-      <select id="tag-filter">
-        <option value="all">すべてのグループ</option>
-        <option value="none">タグなし</option>
-      </select>
-      <button type="button" id="toggle-group-view" class="filter-btn">グループ表示</button>
-    </div>
-
-    <ul id="todo-list" class="todo-list"></ul>
-
-    <div class="footer">
-      <span id="items-left">0 件</span>
-      <button id="clear-completed">完了済みを削除</button>
+  <!-- Shortcuts help modal -->
+  <div id="shortcuts-modal" class="modal-overlay hidden">
+    <div class="modal modal-sm" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>キーボードショートカット</h2>
+        <button type="button" id="shortcuts-close" class="icon-btn" aria-label="閉じる">✕</button>
+      </div>
+      <div class="modal-body">
+        <dl class="shortcut-list">
+          <dt><kbd>n</kbd></dt><dd>新規タスク入力にフォーカス</dd>
+          <dt><kbd>/</kbd></dt><dd>検索を開く</dd>
+          <dt><kbd>1</kbd>-<kbd>4</kbd></dt><dd>リスト/ボード/カレンダー/ダッシュボード切替</dd>
+          <dt><kbd>Esc</kbd></dt><dd>モーダルや検索を閉じる</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>元に戻す</dd>
+          <dt><kbd>?</kbd></dt><dd>このヘルプを表示</dd>
+        </dl>
+      </div>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <div id="toast" class="toast hidden">
+    <span id="toast-message"></span>
+    <button type="button" id="toast-undo">元に戻す</button>
+  </div>
+
+  <div id="day-popover" class="day-popover hidden"></div>
+
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
