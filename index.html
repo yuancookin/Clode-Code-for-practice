@@ -3,62 +3,84 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Todoアプリ</title>
+<meta name="description" content="プロジェクト・タグ・繰り返し・カンバン・カレンダー・統計に対応した高機能タスク管理アプリ">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ad1457">
+<title>TaskFlow — 高機能タスク管理</title>
 <link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✓</text></svg>">
 </head>
 <body>
-  <div class="app">
-    <h1>Todo</h1>
+  <a class="skip-link" href="#view-root">本文へスキップ</a>
 
-    <form id="todo-form" class="todo-form">
-      <input
-        type="text"
-        id="todo-input"
-        placeholder="やることを入力..."
-        autocomplete="off"
-        maxlength="200"
-      >
-      <input type="date" id="todo-due" title="期限">
-      <select id="todo-tag" title="グループ">
-        <option value="">タグなし</option>
-      </select>
-      <button type="submit">追加</button>
-    </form>
+  <div class="app-shell">
+    <header class="topbar">
+      <button type="button" id="btn-menu" class="icon-btn menu-btn" aria-label="サイドバーを開閉" aria-expanded="true">☰</button>
 
-    <div class="tag-manager">
-      <button type="button" id="toggle-tag-panel" class="link-btn">タグを管理 ▾</button>
-      <div id="tag-panel" class="tag-panel hidden">
-        <ul id="tag-list" class="tag-list"></ul>
-        <form id="tag-form" class="tag-form">
-          <input type="color" id="tag-color" value="#4a4de7">
-          <input type="text" id="tag-name" placeholder="新しいタグ名" maxlength="30" autocomplete="off">
-          <button type="submit">追加</button>
-        </form>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">✓</span>
+        <span class="brand-name">TaskFlow</span>
       </div>
-    </div>
 
-    <div class="filters">
-      <button class="filter-btn active" data-filter="all">すべて</button>
-      <button class="filter-btn" data-filter="active">未完了</button>
-      <button class="filter-btn" data-filter="completed">完了済み</button>
-    </div>
+      <div class="search-wrap">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input
+          type="search"
+          id="search-input"
+          placeholder="タスクを検索…  ( / )"
+          autocomplete="off"
+          aria-label="タスクを検索"
+        >
+        <button type="button" id="search-clear" class="search-clear" aria-label="検索をクリア" hidden>✕</button>
+      </div>
 
-    <div class="filters secondary">
-      <select id="tag-filter">
-        <option value="all">すべてのグループ</option>
-        <option value="none">タグなし</option>
-      </select>
-      <button type="button" id="toggle-group-view" class="filter-btn">グループ表示</button>
-    </div>
+      <div class="topbar-actions">
+        <div id="pomodoro-widget" class="pomodoro" aria-label="ポモドーロタイマー"></div>
+        <button type="button" id="btn-undo" class="icon-btn" aria-label="元に戻す (Ctrl+Z)" title="元に戻す (Ctrl+Z)" disabled>↶</button>
+        <button type="button" id="btn-redo" class="icon-btn" aria-label="やり直す (Ctrl+Shift+Z)" title="やり直す (Ctrl+Shift+Z)" disabled>↷</button>
+        <button type="button" id="btn-theme" class="icon-btn" aria-label="テーマを切り替え" title="テーマを切り替え">◐</button>
+        <button type="button" id="btn-help" class="icon-btn" aria-label="ショートカット一覧 (?)" title="ショートカット一覧 (?)">?</button>
+        <button type="button" id="btn-settings" class="icon-btn" aria-label="設定" title="設定">⚙</button>
+      </div>
+    </header>
 
-    <ul id="todo-list" class="todo-list"></ul>
+    <div class="app-body">
+      <aside id="sidebar" class="sidebar" aria-label="ビューとプロジェクト"></aside>
+      <div id="sidebar-scrim" class="sidebar-scrim" hidden></div>
 
-    <div class="footer">
-      <span id="items-left">0 件</span>
-      <button id="clear-completed">完了済みを削除</button>
+      <main class="main">
+        <div id="toolbar" class="toolbar"></div>
+
+        <form id="quick-add" class="quick-add" autocomplete="off">
+          <input
+            type="text"
+            id="quick-add-input"
+            class="quick-add-input"
+            placeholder="タスクを追加…  例: 資料をまとめる 明日 15:00 !高 @仕事 #会議 毎週"
+            maxlength="500"
+            aria-label="タスクを追加"
+          >
+          <button type="submit" class="btn primary">追加</button>
+        </form>
+        <div id="quick-add-hint" class="quick-add-hint" hidden></div>
+
+        <div id="view-root" class="view-root" tabindex="-1"></div>
+
+        <footer id="statusbar" class="statusbar"></footer>
+      </main>
+
+      <aside id="detail" class="detail" aria-label="タスクの詳細" hidden></aside>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <div id="modal-root"></div>
+  <div id="palette-root"></div>
+
+  <noscript>
+    <p style="padding:24px;text-align:center">このアプリを利用するには JavaScript を有効にしてください。</p>
+  </noscript>
+
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>
