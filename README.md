@@ -40,9 +40,51 @@
 - 出力形式はブラウザが対応するものだけを表示します（Chrome / Edge は MP4・WebM、Firefox は WebM）。
 - ブラウザの制約により素材ファイル自体は保存できません。プロジェクト（クリップ構成や設定）だけが保存され、再読み込み後はメディア一覧の 🔗 ボタンからファイルを再リンクします。
 
+## バックエンド (FastAPI)
+
+素材ファイルをサーバーに保存したい場合のための API です。フロントエンド単体（上記）はバックエンドなしでも動作します。
+
+```sh
+pip install -r backend/requirements.txt
+uvicorn backend.main:app --reload     # http://127.0.0.1:8000
+```
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| `POST` | `/upload` | 動画・写真を複数まとめてアップロードし、保存したファイル一覧を JSON で返す |
+| `GET` | `/files` | `uploads/` に保存済みのファイル一覧を新しい順で返す |
+| `GET` | `/uploads/{name}` | 保存したファイルをそのまま配信 |
+| `GET` | `/docs` | 自動生成される API ドキュメント |
+
+```sh
+curl -X POST http://127.0.0.1:8000/upload \
+  -F "files=@opening.mp4" -F "files=@cover.png"
+```
+
+```json
+{
+  "files": [
+    {
+      "name": "20260916-051048_cd6ffb03_cover.png",
+      "original_name": "cover.png",
+      "kind": "image",
+      "content_type": "image/png",
+      "size": 95316,
+      "url": "/uploads/20260916-051048_cd6ffb03_cover.png",
+      "uploaded_at": "2026-09-16T05:10:48.842453+00:00"
+    }
+  ],
+  "rejected": []
+}
+```
+
+- 保存先は `uploads/`（中身は Git 管理外）。保存名は `日時_ランダム_元の名前` で衝突せず、パス区切りを含む名前を送られても `uploads/` の外には書き込みません。
+- 対応形式は動画 (`.mp4` `.webm` `.mov` `.m4v` `.avi` `.mkv` `.ogv`) と画像 (`.png` `.jpg` `.jpeg` `.gif` `.webp` `.avif` `.bmp` `.svg`)。対象外・空・サイズ超過のファイルは `rejected` に理由付きで返し、残りは保存します（1件も保存できなければ 400）。
+- 環境変数: `CLIPSTUDIO_UPLOAD_DIR`（保存先）、`CLIPSTUDIO_MAX_UPLOAD_MB`（1ファイルの上限、既定 2048）、`CLIPSTUDIO_ALLOW_ORIGINS`（CORS 許可オリジン、既定は全許可）
+
 ## 開発
 
-ビルド不要です。静的サーバーで配信するだけで動作します。
+フロントエンドはビルド不要です。静的サーバーで配信するだけで動作します。
 
 ```sh
 python3 -m http.server 8000
