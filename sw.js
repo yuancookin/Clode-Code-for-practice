@@ -1,4 +1,4 @@
-const CACHE_NAME = "taskmax-v1";
+const CACHE_NAME = "clipstudio-v1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,22 +6,25 @@ const ASSETS = [
   "./manifest.json",
   "./js/utils.js",
   "./js/store.js",
-  "./js/filters.js",
-  "./js/dom-helpers.js",
+  "./js/media.js",
+  "./js/audio.js",
+  "./js/renderer.js",
+  "./js/player.js",
+  "./js/timeline.js",
+  "./js/inspector.js",
+  "./js/library.js",
+  "./js/export.js",
   "./js/toast.js",
-  "./js/modal.js",
-  "./js/tags-modal.js",
-  "./js/view-list.js",
-  "./js/view-board.js",
-  "./js/view-calendar.js",
-  "./js/view-stats.js",
   "./js/main.js",
   "./icons/favicon.svg",
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(ASSETS))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -38,6 +41,8 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
   event.respondWith(
     caches.match(event.request).then(
       (cached) =>

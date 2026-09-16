@@ -2,6 +2,10 @@ export function makeId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+export function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n));
+}
+
 export function debounce(fn, wait) {
   let timer = null;
   return (...args) => {
@@ -16,90 +20,55 @@ export function deepClone(value) {
     : JSON.parse(JSON.stringify(value));
 }
 
-export function todayISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return isoDate(d);
+/** 12.345 -> "00:12.34" (分:秒.フレーム相当の1/100秒) */
+export function formatTime(seconds) {
+  const s = Math.max(0, seconds || 0);
+  const m = Math.floor(s / 60);
+  const rest = s - m * 60;
+  const sec = Math.floor(rest);
+  const cs = Math.floor((rest - sec) * 100);
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 }
 
-export function isoDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/** 目盛り用の短い表記 */
+export function formatTick(seconds) {
+  const s = Math.round(seconds * 10) / 10;
+  if (s < 60) return Number.isInteger(s) ? `${s}s` : `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rest = Math.round(s - m * 60);
+  return `${m}:${String(rest).padStart(2, "0")}`;
 }
 
-export function parseISO(iso) {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-export function formatDate(iso) {
-  if (!iso) return "";
-  const [, m, d] = iso.split("-");
-  return `${Number(m)}/${Number(d)}`;
-}
-
-export function formatDateTime(iso, time) {
-  const date = formatDate(iso);
-  return time ? `${date} ${time}` : date;
-}
-
-export function addDays(iso, n) {
-  const d = parseISO(iso);
-  d.setDate(d.getDate() + n);
-  return isoDate(d);
-}
-
-export function addMonths(iso, n) {
-  const d = parseISO(iso);
-  d.setMonth(d.getMonth() + n);
-  return isoDate(d);
-}
-
-export function nextRecurringDate(iso, recurrence) {
-  if (!recurrence) return iso;
-  switch (recurrence.freq) {
-    case "daily":
-      return addDays(iso, 1);
-    case "weekly":
-      return addDays(iso, 7);
-    case "monthly":
-      return addMonths(iso, 1);
-    default:
-      return iso;
+export function formatBytes(bytes) {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
   }
+  return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-export function dueStatus(iso, status) {
-  if (!iso || status === "done") return null;
-  const due = parseISO(iso).getTime();
-  const today = parseISO(todayISO()).getTime();
-  if (due < today) return "overdue";
-  if (due === today) return "due-today";
-  return null;
+export function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function startOfWeek(iso) {
-  const d = parseISO(iso);
-  const day = d.getDay();
-  d.setDate(d.getDate() - day);
-  return isoDate(d);
+export function safeFilename(name) {
+  return (name || "movie").replace(/[\\/:*?"<>|]/g, "_").slice(0, 60);
 }
 
-export function endOfWeek(iso) {
-  return addDays(startOfWeek(iso), 6);
-}
-
-export function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-export function clamp(n, min, max) {
-  return Math.min(max, Math.max(min, n));
+export function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
 }

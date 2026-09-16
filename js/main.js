@@ -1,418 +1,500 @@
+import { formatTime, clamp } from "./utils.js";
 import {
   getState,
+  getSelection,
+  getSelected,
   subscribe,
-  addTask,
-  updateSettings,
-  updateFilter,
-  clearCompleted,
-  deleteTasks,
-  bulkUpdate,
-  exportData,
-  importData,
+  select,
   undo,
+  redo,
+  canUndo,
+  canRedo,
+  removeItem,
+  duplicateItem,
+  splitAt,
+  addText,
+  createText,
+  updateItem,
+  updateProject,
+  totalDuration,
+  loadFromStorage,
+  flushPersist,
+  serialize,
+  deserialize,
+  resetProject,
 } from "./store.js";
-import { renderList, selection, clearSelection } from "./view-list.js";
-import { renderBoard } from "./view-board.js";
-import { renderCalendar } from "./view-calendar.js";
-import { renderStats } from "./view-stats.js";
-import { openTaskModal, closeTaskModal, isModalOpen } from "./modal.js";
-import { openTagModal, closeTagModal, isTagModalOpen } from "./tags-modal.js";
+import { pruneElements, onElementCreated, createSampleClip } from "./media.js";
+import { register as registerAudioElement, setMaster, ensureContext } from "./audio.js";
+import * as player from "./player.js";
+import * as timeline from "./timeline.js";
+import * as inspector from "./inspector.js";
+import * as library from "./library.js";
+import { supportedFormats, exportAndDownload, cancelExport, isExporting, snapshotPNG } from "./export.js";
 import { showToast } from "./toast.js";
-import { debounce, todayISO } from "./utils.js";
 
-/* ---------------- element refs ---------------- */
+const $ = (id) => document.getElementById(id);
 
-const quickAddForm = document.getElementById("quick-add-form");
-const quickAddInput = document.getElementById("quick-add-input");
-const quickAddPriority = document.getElementById("quick-add-priority");
-const quickAddDue = document.getElementById("quick-add-due");
+/* ------------------------------------------------------------------ */
+/* テーマ                                                              */
+/* ------------------------------------------------------------------ */
 
-const searchBar = document.getElementById("search-bar");
-const searchInput = document.getElementById("search-input");
-const btnSearch = document.getElementById("btn-search");
-const searchClose = document.getElementById("search-close");
+const THEME_KEY = "clipstudio.theme";
 
-const btnTheme = document.getElementById("btn-theme");
-const btnShortcuts = document.getElementById("btn-shortcuts");
-const shortcutsModal = document.getElementById("shortcuts-modal");
-const shortcutsClose = document.getElementById("shortcuts-close");
-
-const btnMenu = document.getElementById("btn-menu");
-const menuPanel = document.getElementById("menu-panel");
-const btnExport = document.getElementById("btn-export");
-const btnExportCsv = document.getElementById("btn-export-csv");
-const btnImport = document.getElementById("btn-import");
-const importFile = document.getElementById("import-file");
-const btnTags = document.getElementById("btn-tags");
-const btnNotify = document.getElementById("btn-notify");
-
-const viewTabs = document.querySelectorAll(".view-tab");
-const viewPanels = {
-  list: document.getElementById("view-list"),
-  board: document.getElementById("view-board"),
-  calendar: document.getElementById("view-calendar"),
-  stats: document.getElementById("view-stats"),
-};
-
-const filterStatus = document.getElementById("filter-status");
-const filterRange = document.getElementById("filter-range");
-const filterPriority = document.getElementById("filter-priority");
-const filterTag = document.getElementById("filter-tag");
-const sortBy = document.getElementById("sort-by");
-const toggleGroupTag = document.getElementById("toggle-group-tag");
-const toggleSelectMode = document.getElementById("toggle-select-mode");
-const btnClearCompleted = document.getElementById("btn-clear-completed");
-
-const bulkToolbar = document.getElementById("bulk-toolbar");
-const bulkPriority = document.getElementById("bulk-priority");
-
-/* ---------------- rendering ---------------- */
-
-function syncControls() {
-  const { settings, tags } = getState();
-  const f = settings.filter;
-
-  [...filterStatus.children].forEach((b) =>
-    b.classList.toggle("active", b.dataset.status === f.status)
-  );
-  [...filterRange.children].forEach((b) =>
-    b.classList.toggle("active", b.dataset.range === f.range)
-  );
-  [...filterPriority.children].forEach((b) =>
-    b.classList.toggle("active", b.dataset.priority === f.priority)
-  );
-
-  const tagValue = filterTag.value;
-  filterTag.innerHTML = '<option value="all">すべてのタグ</option><option value="none">タグなし</option>';
-  tags.forEach((tag) => {
-    const opt = document.createElement("option");
-    opt.value = tag.id;
-    opt.textContent = tag.name;
-    filterTag.appendChild(opt);
-  });
-  filterTag.value = ["all", "none", ...tags.map((t) => t.id)].includes(f.tagId) ? f.tagId : "all";
-
-  sortBy.value = settings.sortBy;
-  toggleGroupTag.checked = settings.groupByTag;
-  toggleSelectMode.checked = settings.selectMode;
-  if (!settings.selectMode) clearSelection();
-
-  viewTabs.forEach((tab) => {
-    const active = tab.dataset.view === settings.view;
-    tab.classList.toggle("active", active);
-    tab.setAttribute("aria-selected", String(active));
-  });
-  Object.entries(viewPanels).forEach(([key, panel]) => {
-    panel.classList.toggle("hidden", key !== settings.view);
-  });
-
-  applyTheme();
+function applyTheme(theme) {
+  document.body.dataset.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  document.querySelector('meta[name="theme-color"]').content =
+    theme === "dark" ? "#12131a" : "#f4f4fa";
 }
 
-function renderActiveView() {
-  const { settings } = getState();
-  switch (settings.view) {
-    case "board":
-      renderBoard();
-      break;
-    case "calendar":
-      renderCalendar();
-      break;
-    case "stats":
-      renderStats();
-      break;
-    default:
-      renderList();
+applyTheme(localStorage.getItem(THEME_KEY) || "dark");
+$("btn-theme").addEventListener("click", () => {
+  applyTheme(document.body.dataset.theme === "dark" ? "light" : "dark");
+});
+
+/* ------------------------------------------------------------------ */
+/* メディア読み込み                                                    */
+/* ------------------------------------------------------------------ */
+
+const fileInput = $("file-input");
+const openPicker = () => fileInput.click();
+$("btn-import").addEventListener("click", openPicker);
+$("btn-import-2").addEventListener("click", openPicker);
+fileInput.addEventListener("change", async () => {
+  const files = fileInput.files;
+  if (files?.length) await library.importFiles(files);
+  fileInput.value = "";
+});
+
+const dropzone = $("dropzone");
+["dragenter", "dragover"].forEach((type) => {
+  window.addEventListener(type, (event) => {
+    if (!event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    dropzone.classList.add("active");
+  });
+});
+["dragleave", "drop"].forEach((type) => {
+  window.addEventListener(type, (event) => {
+    if (type === "drop") event.preventDefault();
+    if (event.relatedTarget) return;
+    dropzone.classList.remove("active");
+  });
+});
+window.addEventListener("drop", async (event) => {
+  const files = event.dataTransfer?.files;
+  if (files?.length) await library.importFiles(files);
+});
+
+onElementCreated((element) => registerAudioElement(element));
+
+/* ------------------------------------------------------------------ */
+/* トランスポート                                                      */
+/* ------------------------------------------------------------------ */
+
+const playBtn = $("btn-play");
+playBtn.addEventListener("click", () => {
+  ensureContext();
+  player.setRate(1);
+  player.toggle();
+});
+$("btn-to-start").addEventListener("click", () => player.seek(0));
+$("btn-to-end").addEventListener("click", () => player.seek(totalDuration()));
+$("btn-prev-frame").addEventListener("click", () => player.step(-1));
+$("btn-next-frame").addEventListener("click", () => player.step(1));
+$("btn-loop").addEventListener("click", (event) => {
+  const next = !player.isLooping();
+  player.setLooping(next);
+  event.currentTarget.setAttribute("aria-pressed", String(next));
+  event.currentTarget.classList.toggle("active", next);
+});
+
+const volumeSlider = $("master-volume");
+const muteBtn = $("btn-mute");
+let muted = false;
+function applyVolume() {
+  setMaster(Number(volumeSlider.value) / 100, muted);
+  muteBtn.textContent = muted || Number(volumeSlider.value) === 0 ? "🔇" : "🔊";
+  muteBtn.setAttribute("aria-pressed", String(muted));
+}
+volumeSlider.addEventListener("input", applyVolume);
+muteBtn.addEventListener("click", () => {
+  muted = !muted;
+  applyVolume();
+});
+applyVolume();
+
+/* ------------------------------------------------------------------ */
+/* タイムライン操作                                                    */
+/* ------------------------------------------------------------------ */
+
+$("btn-split").addEventListener("click", () => {
+  if (!splitAt(player.getTime())) showToast("再生位置に分割できるクリップがありません");
+});
+$("btn-duplicate").addEventListener("click", () => {
+  const selection = getSelection();
+  if (!selection) return showToast("複製するクリップを選択してください");
+  duplicateItem(selection.type, selection.id);
+});
+$("btn-delete").addEventListener("click", deleteSelection);
+$("btn-add-text").addEventListener("click", () => {
+  addText(createText(player.getTime()));
+  showToast("テロップを追加しました");
+});
+$("btn-add-transition").addEventListener("click", () => {
+  const selected = getSelected();
+  const selection = getSelection();
+  if (!selection || selection.type !== "clip") {
+    return showToast("映像クリップを選択してください");
   }
-}
-
-function render() {
-  syncControls();
-  renderActiveView();
-}
-
-subscribe(render);
-
-/* ---------------- theme ---------------- */
-
-function resolvedTheme() {
-  const { settings } = getState();
-  if (settings.theme === "system") {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-  return settings.theme;
-}
-
-function applyTheme() {
-  document.documentElement.dataset.theme = resolvedTheme();
-}
-
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-  if (getState().settings.theme === "system") applyTheme();
-});
-
-btnTheme.addEventListener("click", () => {
-  const order = ["system", "light", "dark"];
-  const current = getState().settings.theme;
-  const next = order[(order.indexOf(current) + 1) % order.length];
-  updateSettings({ theme: next });
-  showToast(
-    next === "system" ? "テーマ: システム設定" : next === "light" ? "テーマ: ライト" : "テーマ: ダーク"
+  const index = getState().clips.findIndex((c) => c.id === selection.id);
+  if (index <= 0) return showToast("2番目以降のクリップに設定できます");
+  const current = selected.transition?.type || "none";
+  updateItem(
+    "clip",
+    selection.id,
+    {
+      transition: {
+        type: current === "none" ? "crossfade" : "none",
+        duration: selected.transition?.duration || 0.5,
+      },
+    },
+    { label: "トランジション" }
   );
 });
+$("btn-zoom-in").addEventListener("click", () => timeline.zoomBy(1.3));
+$("btn-zoom-out").addEventListener("click", () => timeline.zoomBy(1 / 1.3));
+$("btn-zoom-fit").addEventListener("click", () => timeline.zoomToFit());
 
-/* ---------------- quick add ---------------- */
+function deleteSelection() {
+  const selection = getSelection();
+  if (!selection) return showToast("削除するクリップを選択してください");
+  removeItem(selection.type, selection.id);
+  showToast("削除しました", { actionLabel: "元に戻す", onAction: () => undo() });
+}
 
-quickAddForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const title = quickAddInput.value.trim();
-  if (!title) return;
-  addTask({
-    title,
-    dueDate: quickAddDue.value || null,
-    priority: quickAddPriority.value,
-  });
-  quickAddInput.value = "";
-  quickAddDue.value = "";
-  quickAddPriority.value = "none";
-  quickAddInput.focus();
+$("btn-undo").addEventListener("click", () => {
+  if (!undo()) showToast("これ以上戻せません");
+});
+$("btn-redo").addEventListener("click", () => {
+  if (!redo()) showToast("やり直す操作がありません");
 });
 
-/* ---------------- search ---------------- */
+/* ------------------------------------------------------------------ */
+/* プロジェクト                                                        */
+/* ------------------------------------------------------------------ */
 
-function openSearch() {
-  searchBar.classList.remove("hidden");
-  searchInput.focus();
-}
-function closeSearch() {
-  searchBar.classList.add("hidden");
-  searchInput.value = "";
-  searchInput.blur();
-  updateFilter({ query: "" });
-}
-btnSearch.addEventListener("click", () => {
-  if (searchBar.classList.contains("hidden")) openSearch();
-  else closeSearch();
-});
-searchClose.addEventListener("click", closeSearch);
-searchInput.addEventListener(
-  "input",
-  debounce(() => updateFilter({ query: searchInput.value }), 120)
+const nameInput = $("project-name");
+nameInput.addEventListener("change", () =>
+  updateProject({ name: nameInput.value.trim() || "無題のプロジェクト" }, { label: "名前" })
 );
 
-/* ---------------- menu ---------------- */
+const menuPanel = $("menu-panel");
+$("btn-menu").addEventListener("click", (event) => {
+  event.stopPropagation();
+  menuPanel.classList.toggle("hidden");
+});
+document.addEventListener("click", () => menuPanel.classList.add("hidden"));
 
-btnMenu.addEventListener("click", () => menuPanel.classList.toggle("hidden"));
-document.addEventListener("click", (e) => {
-  if (!menuPanel.contains(e.target) && e.target !== btnMenu) {
-    menuPanel.classList.add("hidden");
-  }
+$("btn-project-new").addEventListener("click", () => {
+  if (!confirm("現在のプロジェクトを破棄して新規作成しますか？")) return;
+  resetProject();
+  player.seek(0);
+  showToast("新しいプロジェクトを作成しました", { actionLabel: "元に戻す", onAction: () => undo() });
 });
 
-btnExport.addEventListener("click", () => {
-  const data = exportData();
-  downloadFile(
-    `taskmax-export-${todayISO()}.json`,
-    JSON.stringify(data, null, 2),
-    "application/json"
-  );
-  menuPanel.classList.add("hidden");
-});
-
-btnExportCsv.addEventListener("click", () => {
-  const { tasks } = getState();
-  const header = ["title", "status", "priority", "dueDate", "dueTime", "tags", "notes"];
-  const rows = tasks.map((t) => [
-    t.title,
-    t.status,
-    t.priority,
-    t.dueDate || "",
-    t.dueTime || "",
-    t.tagIds.join("|"),
-    (t.notes || "").replace(/\n/g, " "),
-  ]);
-  const csv = [header, ...rows]
-    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-  downloadFile(`taskmax-export-${todayISO()}.csv`, "﻿" + csv, "text/csv");
-  menuPanel.classList.add("hidden");
-});
-
-function downloadFile(filename, content, type) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
+$("btn-project-save").addEventListener("click", () => {
+  const blob = new Blob([serialize()], { type: "application/json" });
   const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
+  a.href = URL.createObjectURL(blob);
+  a.download = `${getState().name || "project"}.clipstudio.json`;
   a.click();
-  URL.revokeObjectURL(url);
-}
-
-btnImport.addEventListener("click", () => {
-  importFile.click();
-  menuPanel.classList.add("hidden");
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  showToast("プロジェクトを保存しました（素材ファイルは含まれません）");
 });
-importFile.addEventListener("change", async () => {
-  const file = importFile.files[0];
+
+const projectInput = $("project-input");
+$("btn-project-load").addEventListener("click", () => projectInput.click());
+projectInput.addEventListener("change", async () => {
+  const file = projectInput.files?.[0];
+  projectInput.value = "";
   if (!file) return;
   try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    const replace = confirm(
-      "既存のタスクを置き換えますか？\nOK: 置き換え / キャンセル: 追加としてインポート"
-    );
-    importData(data, replace ? "replace" : "merge");
-    showToast("インポートが完了しました");
-  } catch {
-    showToast("インポートに失敗しました（JSON形式を確認してください）");
+    deserialize(await file.text());
+    player.seek(0);
+    showToast("プロジェクトを読み込みました。素材を再リンクしてください");
+  } catch (error) {
+    showToast(error.message || "読み込みに失敗しました");
   }
-  importFile.value = "";
 });
 
-btnTags.addEventListener("click", () => {
-  openTagModal();
-  menuPanel.classList.add("hidden");
+$("btn-snapshot").addEventListener("click", async () => {
+  await snapshotPNG();
+  showToast("現在のフレームを PNG で保存しました");
 });
 
-btnNotify.addEventListener("click", async () => {
-  if (!("Notification" in window)) {
-    showToast("このブラウザは通知に対応していません");
+$("btn-sample").addEventListener("click", async () => {
+  showToast("サンプル素材を生成しています...", { duration: 8000 });
+  try {
+    const files = [
+      await createSampleClip({ label: "OPENING", hue: 265, seconds: 3 }),
+      await createSampleClip({ label: "SCENE 2", hue: 165, seconds: 3 }),
+    ];
+    await library.importFiles(files);
+    showToast("サンプル素材を追加しました");
+  } catch (error) {
+    showToast(error.message || "サンプル素材を生成できませんでした");
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* 書き出しダイアログ                                                  */
+/* ------------------------------------------------------------------ */
+
+const exportDialog = $("export-dialog");
+const formatSelect = $("export-format");
+const exportNote = $("export-note");
+const exportProgress = $("export-progress");
+const exportBar = $("export-bar");
+const exportStatus = $("export-status");
+const exportStart = $("export-start");
+const exportCancel = $("export-cancel");
+
+function fillFormats() {
+  const formats = supportedFormats();
+  formatSelect.innerHTML = "";
+  formats.forEach((format) => {
+    const option = document.createElement("option");
+    option.value = format.mime;
+    option.textContent = format.label;
+    formatSelect.appendChild(option);
+  });
+  exportStart.disabled = formats.length === 0;
+  if (!formats.length) {
+    exportNote.textContent = "このブラウザは動画の書き出しに対応していません。Chrome / Edge / Firefox の最新版をお試しください。";
+  }
+}
+fillFormats();
+
+function updateExportNote() {
+  const total = totalDuration();
+  exportNote.textContent = `書き出しは実時間で行われます（約 ${formatTime(total)}）。完了までタブを開いたままにしてください。`;
+}
+
+$("btn-export").addEventListener("click", () => {
+  updateExportNote();
+  exportProgress.classList.add("hidden");
+  exportBar.style.width = "0%";
+  exportStart.disabled = supportedFormats().length === 0 || totalDuration() <= 0.05;
+  if (totalDuration() <= 0.05) exportNote.textContent = "タイムラインにクリップを追加してください。";
+  exportDialog.showModal();
+});
+
+exportCancel.addEventListener("click", () => {
+  if (isExporting()) {
+    cancelExport();
+    exportStatus.textContent = "中止しています...";
     return;
   }
-  const permission = await Notification.requestPermission();
-  showToast(permission === "granted" ? "通知を有効化しました" : "通知が許可されませんでした");
-  menuPanel.classList.add("hidden");
+  exportDialog.close();
 });
 
-/* ---------------- view tabs ---------------- */
-
-viewTabs.forEach((tab) => {
-  tab.addEventListener("click", () => updateSettings({ view: tab.dataset.view }));
-});
-
-/* ---------------- filters ---------------- */
-
-filterStatus.addEventListener("click", (e) => {
-  if (e.target.dataset.status) updateFilter({ status: e.target.dataset.status });
-});
-filterRange.addEventListener("click", (e) => {
-  if (e.target.dataset.range) updateFilter({ range: e.target.dataset.range });
-});
-filterPriority.addEventListener("click", (e) => {
-  if (e.target.dataset.priority) updateFilter({ priority: e.target.dataset.priority });
-});
-filterTag.addEventListener("change", () => updateFilter({ tagId: filterTag.value }));
-sortBy.addEventListener("change", () => updateSettings({ sortBy: sortBy.value }));
-toggleGroupTag.addEventListener("change", () =>
-  updateSettings({ groupByTag: toggleGroupTag.checked })
-);
-toggleSelectMode.addEventListener("change", () => {
-  clearSelection();
-  updateSettings({ selectMode: toggleSelectMode.checked });
-});
-
-btnClearCompleted.addEventListener("click", () => {
-  const { tasks } = getState();
-  if (!tasks.some((t) => t.status === "done")) return;
-  clearCompleted();
-  showToast("完了済みタスクを削除しました", { undoable: true });
-});
-
-/* ---------------- bulk toolbar ---------------- */
-
-bulkToolbar.addEventListener("click", (e) => {
-  const action = e.target.dataset.bulk;
-  if (!action) return;
-  const ids = [...selection];
-  if (ids.length === 0) return;
-  if (action === "done") bulkUpdate(ids, { status: "done", completedAt: Date.now() });
-  if (action === "todo") bulkUpdate(ids, { status: "todo", completedAt: null });
-  if (action === "delete") {
-    deleteTasks(ids);
-    showToast(`${ids.length}件のタスクを削除しました`, { undoable: true });
+exportStart.addEventListener("click", async () => {
+  if (isExporting()) return;
+  ensureContext();
+  exportProgress.classList.remove("hidden");
+  exportStart.disabled = true;
+  exportCancel.textContent = "中止";
+  const total = totalDuration();
+  try {
+    await exportAndDownload({
+      mime: formatSelect.value,
+      scale: Number($("export-scale").value),
+      fps: Number($("export-fps").value),
+      bitrate: Number($("export-quality").value),
+      onProgress: (ratio, time) => {
+        exportBar.style.width = `${Math.round(ratio * 100)}%`;
+        exportStatus.textContent = `書き出し中... ${formatTime(time)} / ${formatTime(total)}`;
+      },
+    });
+    exportBar.style.width = "100%";
+    exportStatus.textContent = "完了しました";
+    showToast("動画を書き出しました");
+  } catch (error) {
+    exportStatus.textContent = error.message || "書き出しに失敗しました";
+    showToast(error.message || "書き出しに失敗しました");
+  } finally {
+    exportStart.disabled = false;
+    exportCancel.textContent = "閉じる";
   }
-  clearSelection();
-  renderList();
 });
 
-document.getElementById("bulk-cancel").addEventListener("click", () => {
-  clearSelection();
-  updateSettings({ selectMode: false });
-});
+/* ------------------------------------------------------------------ */
+/* ショートカット                                                      */
+/* ------------------------------------------------------------------ */
 
-bulkPriority.addEventListener("change", () => {
-  const value = bulkPriority.value;
-  if (!value) return;
-  const ids = [...selection];
-  if (ids.length) bulkUpdate(ids, { priority: value });
-  bulkPriority.value = "";
-});
-
-/* ---------------- shortcuts modal ---------------- */
-
-btnShortcuts.addEventListener("click", () => shortcutsModal.classList.remove("hidden"));
-shortcutsClose.addEventListener("click", () => shortcutsModal.classList.add("hidden"));
-shortcutsModal.addEventListener("click", (e) => {
-  if (e.target === shortcutsModal) shortcutsModal.classList.add("hidden");
-});
-
-/* ---------------- keyboard shortcuts ---------------- */
+$("btn-shortcuts").addEventListener("click", () => $("shortcuts-dialog").showModal());
 
 function isTyping(target) {
-  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target?.isContentEditable
+  );
 }
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    if (isModalOpen()) return closeTaskModal();
-    if (isTagModalOpen()) return closeTagModal();
-    if (!shortcutsModal.classList.contains("hidden")) return shortcutsModal.classList.add("hidden");
-    if (!searchBar.classList.contains("hidden")) return closeSearch();
-    document.getElementById("day-popover").classList.add("hidden");
-    if (document.activeElement) document.activeElement.blur();
+let shuttle = 1;
+
+window.addEventListener("keydown", (event) => {
+  if (isTyping(event.target) || document.querySelector("dialog[open]")) return;
+  const meta = event.ctrlKey || event.metaKey;
+
+  if (meta && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    if (event.shiftKey) redo();
+    else undo();
     return;
   }
-
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-    e.preventDefault();
-    if (undo()) showToast("元に戻しました");
+  if (meta && event.key.toLowerCase() === "d") {
+    event.preventDefault();
+    const selection = getSelection();
+    if (selection) duplicateItem(selection.type, selection.id);
     return;
   }
+  if (meta) return;
 
-  if (isTyping(e.target)) return;
-
-  if (e.key === "n") {
-    e.preventDefault();
-    quickAddInput.focus();
-  } else if (e.key === "/") {
-    e.preventDefault();
-    openSearch();
-  } else if (e.key === "?") {
-    shortcutsModal.classList.remove("hidden");
-  } else if (["1", "2", "3", "4"].includes(e.key)) {
-    const views = ["list", "board", "calendar", "stats"];
-    updateSettings({ view: views[Number(e.key) - 1] });
+  switch (event.key) {
+    case " ":
+      event.preventDefault();
+      player.setRate(1);
+      player.toggle();
+      break;
+    case "ArrowLeft":
+      event.preventDefault();
+      player.step(event.shiftKey ? -getState().fps : -1);
+      break;
+    case "ArrowRight":
+      event.preventDefault();
+      player.step(event.shiftKey ? getState().fps : 1);
+      break;
+    case "Home":
+      player.seek(0);
+      break;
+    case "End":
+      player.seek(totalDuration());
+      break;
+    case "Delete":
+    case "Backspace":
+      event.preventDefault();
+      deleteSelection();
+      break;
+    case "Escape":
+      select(null, null);
+      break;
+    case "+":
+    case "=":
+      timeline.zoomBy(1.3);
+      break;
+    case "-":
+      timeline.zoomBy(1 / 1.3);
+      break;
+    case "?":
+      $("shortcuts-dialog").showModal();
+      break;
+    default:
+      handleLetterKey(event);
   }
 });
 
-/* ---------------- due-date notifications ---------------- */
-
-const notified = new Set();
-function checkDueNotifications() {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  const { tasks } = getState();
-  const today = todayISO();
-  tasks.forEach((t) => {
-    if (t.status === "done" || !t.dueDate || t.dueDate > today) return;
-    if (notified.has(t.id)) return;
-    notified.add(t.id);
-    const label = t.dueDate < today ? "期限切れ" : "本日期限";
-    new Notification(`${label}: ${t.title}`, { body: t.notes || "" });
-  });
+function handleLetterKey(event) {
+  switch (event.key.toLowerCase()) {
+    case "s":
+      if (!splitAt(player.getTime())) showToast("再生位置に分割できるクリップがありません");
+      break;
+    case "t":
+      addText(createText(player.getTime()));
+      break;
+    case "m":
+      muted = !muted;
+      applyVolume();
+      break;
+    case "f":
+      timeline.zoomToFit();
+      break;
+    case "l":
+      shuttle = player.getRate() > 0 ? clamp(Math.abs(player.getRate()) * 2, 1, 8) : 1;
+      player.setRate(shuttle);
+      if (!player.isPlaying()) player.play();
+      break;
+    case "k":
+      player.pause();
+      player.setRate(1);
+      break;
+    case "j":
+      shuttle = player.getRate() < 0 ? clamp(Math.abs(player.getRate()) * 2, 1, 8) : 1;
+      player.setRate(-shuttle);
+      if (!player.isPlaying()) player.play();
+      break;
+    default:
+      break;
+  }
 }
-setInterval(checkDueNotifications, 60000);
 
-/* ---------------- service worker ---------------- */
+/* ------------------------------------------------------------------ */
+/* 再描画                                                              */
+/* ------------------------------------------------------------------ */
+
+const tcCurrent = $("tc-current");
+const tcTotal = $("tc-total");
+const stageEmpty = $("stage-empty");
+const stage = $("stage");
+
+function syncStageSize() {
+  const project = getState();
+  stage.style.aspectRatio = `${project.width} / ${project.height}`;
+}
+
+player.onTick((time, playing) => {
+  tcCurrent.textContent = formatTime(time);
+  timeline.updatePlayhead(time);
+  playBtn.textContent = playing ? "❚❚" : "▶";
+  playBtn.setAttribute("aria-label", playing ? "一時停止" : "再生");
+});
+
+subscribe(() => {
+  const project = getState();
+  if (document.activeElement !== nameInput) nameInput.value = project.name;
+  syncStageSize();
+  player.resize();
+  pruneElements();
+  library.render();
+  timeline.render();
+  inspector.render();
+  tcTotal.textContent = formatTime(totalDuration());
+  stageEmpty.classList.toggle("hidden", project.clips.length > 0 || project.texts.length > 0);
+  $("btn-undo").disabled = !canUndo();
+  $("btn-redo").disabled = !canRedo();
+});
+
+/* ------------------------------------------------------------------ */
+/* 起動                                                                */
+/* ------------------------------------------------------------------ */
+
+const restored = loadFromStorage();
+syncStageSize();
+player.resize();
+library.render();
+timeline.render();
+inspector.render();
+timeline.setZoom(60);
+tcTotal.textContent = formatTime(totalDuration());
+$("btn-undo").disabled = true;
+$("btn-redo").disabled = true;
+
+if (restored) {
+  showToast("前回のプロジェクトを復元しました。素材ファイルを再リンクしてください", { duration: 7000 });
+}
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
@@ -420,7 +502,15 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-/* ---------------- init ---------------- */
+window.addEventListener("pagehide", flushPersist);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushPersist();
+});
 
-render();
-setTimeout(checkDueNotifications, 1000);
+window.addEventListener("beforeunload", (event) => {
+  flushPersist();
+  if (isExporting()) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});

@@ -1,82 +1,74 @@
-import { makeId, deepClone, debounce, nextRecurringDate } from "./utils.js";
+import { makeId, clamp, deepClone } from "./utils.js";
 
-const TASKS_KEY = "tmx.tasks";
-const TAGS_KEY = "tmx.tags";
-const SETTINGS_KEY = "tmx.settings";
+const STORAGE_KEY = "clipstudio.project.v1";
+const MAX_HISTORY = 60;
 
-const DEFAULT_SETTINGS = {
-  theme: "system",
-  view: "list",
-  sortBy: "manual",
-  groupByTag: false,
-  selectMode: false,
-  filter: {
-    status: "all",
-    tagId: "all",
-    priority: "all",
-    query: "",
-    range: "all",
-  },
-  calendarCursor: null,
+export const DEFAULT_FILTERS = {
+  brightness: 100,
+  contrast: 100,
+  saturate: 100,
+  hue: 0,
+  blur: 0,
+  grayscale: 0,
+  sepia: 0,
 };
 
-function load(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    const value = JSON.parse(raw);
-    return value == null ? fallback : value;
-  } catch {
-    return fallback;
-  }
-}
+export const FILTER_PRESETS = {
+  none: { label: "なし", values: {} },
+  vivid: { label: "ビビッド", values: { saturate: 150, contrast: 115 } },
+  mono: { label: "モノクロ", values: { grayscale: 100, contrast: 110 } },
+  sepia: { label: "セピア", values: { sepia: 80, saturate: 80 } },
+  vintage: { label: "ヴィンテージ", values: { sepia: 40, contrast: 90, saturate: 85, brightness: 105 } },
+  cool: { label: "クール", values: { hue: 190, saturate: 110 } },
+  warm: { label: "ウォーム", values: { hue: 15, saturate: 115, brightness: 105 } },
+  dream: { label: "ドリーム", values: { blur: 2, brightness: 110, saturate: 120 } },
+};
 
-function migrateTask(t, index) {
+export const TRANSITIONS = {
+  none: "なし",
+  crossfade: "クロスフェード",
+  fadeblack: "黒フェード",
+  wipe: "ワイプ",
+  slide: "スライド",
+  zoom: "ズーム",
+};
+
+export const ASPECT_PRESETS = [
+  { label: "YouTube 16:9 (1280×720)", width: 1280, height: 720 },
+  { label: "フル HD 16:9 (1920×1080)", width: 1920, height: 1080 },
+  { label: "縦動画 9:16 (1080×1920)", width: 1080, height: 1920 },
+  { label: "正方形 1:1 (1080×1080)", width: 1080, height: 1080 },
+  { label: "SNS 4:5 (1080×1350)", width: 1080, height: 1350 },
+];
+
+function emptyProject() {
   return {
-    id: t.id || makeId(),
-    title: t.title ?? t.text ?? "",
-    notes: t.notes ?? "",
-    status: t.status || (t.completed ? "done" : "todo"),
-    priority: t.priority || "none",
-    tagIds: t.tagIds || (t.tagId ? [t.tagId] : []),
-    dueDate: t.dueDate || null,
-    dueTime: t.dueTime || null,
-    subtasks: t.subtasks || [],
-    recurrence: t.recurrence || null,
-    pinned: !!t.pinned,
-    order: t.order ?? index,
-    createdAt: t.createdAt || Date.now(),
-    updatedAt: t.updatedAt || Date.now(),
-    completedAt: t.completedAt || (t.completed ? Date.now() : null),
+    version: 1,
+    name: "無題のプロジェクト",
+    width: 1280,
+    height: 720,
+    fps: 30,
+    background: "#000000",
+    media: [],
+    clips: [],
+    audio: [],
+    texts: [],
   };
 }
 
+let state = emptyProject();
+let selection = null; // { type: "clip" | "audio" | "text", id }
 const listeners = new Set();
 const undoStack = [];
-const MAX_UNDO = 25;
+const redoStack = [];
+let pending = null; // バッチ編集中のスナップショット
 
-const state = {
-  tasks: load(TASKS_KEY, []).map(migrateTask),
-  tags: load(TAGS_KEY, []),
-  settings: Object.assign(deepClone(DEFAULT_SETTINGS), load(SETTINGS_KEY, {})),
-};
-state.settings.filter = Object.assign(
-  deepClone(DEFAULT_SETTINGS.filter),
-  state.settings.filter || {}
-);
+export function getState() {
+  return state;
+}
 
-const persistTasks = debounce(() => {
-  localStorage.setItem(TASKS_KEY, JSON.stringify(state.tasks));
-}, 150);
-const persistTags = debounce(() => {
-  localStorage.setItem(TAGS_KEY, JSON.stringify(state.tags));
-}, 150);
-const persistSettings = debounce(() => {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
-}, 150);
-
-function notify() {
-  listeners.forEach((fn) => fn());
+export function getSelection() {
+  return selection;
 }
 
 export function subscribe(fn) {
@@ -84,22 +76,83 @@ export function subscribe(fn) {
   return () => listeners.delete(fn);
 }
 
+function emit(detail = {}) {
+  listeners.forEach((fn) => fn(state, detail));
+  persistLater();
+}
+
+/** 取り消し履歴に残す単発の編集 */
+export function commit(label, mutator) {
+  pushUndo(label);
+  mutator(state);
+  emit({ label });
+}
+
+/** 履歴に残さない編集（選択やスクラブなど） */
+export function touch(detail) {
+  emit(detail || {});
+}
+
+/** ドラッグ操作など、開始〜終了をひとまとめに履歴へ入れる */
+export function beginBatch(label) {
+  if (pending) return;
+  pending = { label, snapshot: snapshot() };
+}
+
+export function endBatch() {
+  if (!pending) return;
+  const before = pending.snapshot;
+  pending = null;
+  if (JSON.stringify(before) === JSON.stringify(snapshot())) return;
+  undoStack.push(before);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
+  emit({ history: true });
+}
+
+export function cancelBatch() {
+  pending = null;
+}
+
 function snapshot() {
-  undoStack.push({
-    tasks: deepClone(state.tasks),
-    tags: deepClone(state.tags),
+  return deepClone({
+    name: state.name,
+    width: state.width,
+    height: state.height,
+    fps: state.fps,
+    background: state.background,
+    media: state.media,
+    clips: state.clips,
+    audio: state.audio,
+    texts: state.texts,
   });
-  if (undoStack.length > MAX_UNDO) undoStack.shift();
+}
+
+function restore(snap) {
+  Object.assign(state, deepClone(snap));
+}
+
+function pushUndo() {
+  undoStack.push(snapshot());
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
 }
 
 export function undo() {
-  const prev = undoStack.pop();
-  if (!prev) return false;
-  state.tasks = prev.tasks;
-  state.tags = prev.tags;
-  persistTasks();
-  persistTags();
-  notify();
+  if (!undoStack.length) return false;
+  redoStack.push(snapshot());
+  restore(undoStack.pop());
+  ensureSelectionValid();
+  emit({ history: true });
+  return true;
+}
+
+export function redo() {
+  if (!redoStack.length) return false;
+  undoStack.push(snapshot());
+  restore(redoStack.pop());
+  ensureSelectionValid();
+  emit({ history: true });
   return true;
 }
 
@@ -107,248 +160,359 @@ export function canUndo() {
   return undoStack.length > 0;
 }
 
-function touch(task) {
-  task.updatedAt = Date.now();
+export function canRedo() {
+  return redoStack.length > 0;
 }
 
-/* ---------------- selectors ---------------- */
-
-export function getState() {
-  return state;
+export function select(type, id) {
+  const next = type && id ? { type, id } : null;
+  const same = (!selection && !next) || (selection && next && selection.type === next.type && selection.id === next.id);
+  if (same) return;
+  selection = next;
+  emit({ selection: true });
 }
 
-export function getTag(id) {
-  return state.tags.find((t) => t.id === id) || null;
+function ensureSelectionValid() {
+  if (!selection) return;
+  if (!getSelected()) selection = null;
 }
 
-export function getTasks() {
-  return state.tasks;
+export function getSelected() {
+  if (!selection) return null;
+  const list = listFor(selection.type);
+  return list.find((item) => item.id === selection.id) || null;
 }
 
-/* ---------------- task actions ---------------- */
+export function listFor(type) {
+  if (type === "clip") return state.clips;
+  if (type === "audio") return state.audio;
+  if (type === "text") return state.texts;
+  return [];
+}
 
-export function addTask({ title, dueDate, dueTime, tagIds, priority }) {
-  snapshot();
-  const maxOrder = state.tasks.reduce((m, t) => Math.max(m, t.order), -1);
-  const task = {
+/* ------------------------------------------------------------------ */
+/* メディア                                                            */
+/* ------------------------------------------------------------------ */
+
+export function addMedia(entry) {
+  const media = {
     id: makeId(),
-    title: title.trim(),
-    notes: "",
-    status: "todo",
-    priority: priority || "none",
-    tagIds: tagIds || [],
-    dueDate: dueDate || null,
-    dueTime: dueTime || null,
-    subtasks: [],
-    recurrence: null,
-    pinned: false,
-    order: maxOrder + 1,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    completedAt: null,
+    name: entry.name,
+    kind: entry.kind,
+    duration: entry.duration || 0,
+    width: entry.width || 0,
+    height: entry.height || 0,
+    size: entry.size || 0,
+    type: entry.type || "",
+    thumbnail: entry.thumbnail || "",
+    missing: false,
+    ...entry.overrides,
   };
-  state.tasks.push(task);
-  persistTasks();
-  notify();
-  return task;
+  commit("メディアを追加", (s) => s.media.push(media));
+  return media;
 }
 
-export function updateTask(id, patch) {
-  snapshot();
-  const task = state.tasks.find((t) => t.id === id);
-  if (!task) return;
-  Object.assign(task, patch);
-  touch(task);
-  persistTasks();
-  notify();
+export function getMedia(id) {
+  return state.media.find((m) => m.id === id) || null;
 }
 
-export function setTaskStatus(id, status) {
-  snapshot();
-  const task = state.tasks.find((t) => t.id === id);
-  if (!task) return;
-  task.status = status;
-  task.completedAt = status === "done" ? Date.now() : null;
-  touch(task);
-
-  if (status === "done" && task.recurrence && task.dueDate) {
-    const clone = {
-      ...deepClone(task),
-      id: makeId(),
-      status: "todo",
-      completedAt: null,
-      pinned: false,
-      dueDate: nextRecurringDate(task.dueDate, task.recurrence),
-      subtasks: task.subtasks.map((s) => ({ ...s, done: false })),
-      order: state.tasks.reduce((m, t) => Math.max(m, t.order), -1) + 1,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    state.tasks.push(clone);
-  }
-
-  persistTasks();
-  notify();
-}
-
-export function toggleDone(id) {
-  const task = state.tasks.find((t) => t.id === id);
-  if (!task) return;
-  setTaskStatus(id, task.status === "done" ? "todo" : "done");
-}
-
-export function deleteTask(id) {
-  snapshot();
-  state.tasks = state.tasks.filter((t) => t.id !== id);
-  persistTasks();
-  notify();
-}
-
-export function deleteTasks(ids) {
-  snapshot();
-  const set = new Set(ids);
-  state.tasks = state.tasks.filter((t) => !set.has(t.id));
-  persistTasks();
-  notify();
-}
-
-export function bulkUpdate(ids, patch) {
-  snapshot();
-  const set = new Set(ids);
-  state.tasks.forEach((t) => {
-    if (set.has(t.id)) {
-      Object.assign(t, patch);
-      touch(t);
-    }
+export function removeMedia(id) {
+  commit("メディアを削除", (s) => {
+    s.media = s.media.filter((m) => m.id !== id);
+    s.clips = s.clips.filter((c) => c.mediaId !== id);
+    s.audio = s.audio.filter((c) => c.mediaId !== id);
   });
-  persistTasks();
-  notify();
+  ensureSelectionValid();
 }
 
-export function clearCompleted() {
-  snapshot();
-  state.tasks = state.tasks.filter((t) => t.status !== "done");
-  persistTasks();
-  notify();
-}
+/* ------------------------------------------------------------------ */
+/* クリップ生成                                                        */
+/* ------------------------------------------------------------------ */
 
-export function reorderTasks(orderedIds) {
-  snapshot();
-  orderedIds.forEach((id, index) => {
-    const task = state.tasks.find((t) => t.id === id);
-    if (task) task.order = index;
-  });
-  persistTasks();
-  notify();
-}
+export const IMAGE_DEFAULT_DURATION = 4;
 
-export function addSubtask(taskId, text) {
-  snapshot();
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  task.subtasks.push({ id: makeId(), text: text.trim(), done: false });
-  touch(task);
-  persistTasks();
-  notify();
-}
-
-export function toggleSubtask(taskId, subtaskId) {
-  snapshot();
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  const sub = task.subtasks.find((s) => s.id === subtaskId);
-  if (!sub) return;
-  sub.done = !sub.done;
-  touch(task);
-  persistTasks();
-  notify();
-}
-
-export function deleteSubtask(taskId, subtaskId) {
-  snapshot();
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  task.subtasks = task.subtasks.filter((s) => s.id !== subtaskId);
-  touch(task);
-  persistTasks();
-  notify();
-}
-
-/* ---------------- tag actions ---------------- */
-
-export function addTag(name, color) {
-  snapshot();
-  const tag = { id: makeId(), name: name.trim(), color };
-  state.tags.push(tag);
-  persistTags();
-  notify();
-  return tag;
-}
-
-export function updateTag(id, patch) {
-  snapshot();
-  const tag = state.tags.find((t) => t.id === id);
-  if (!tag) return;
-  Object.assign(tag, patch);
-  persistTags();
-  notify();
-}
-
-export function deleteTag(id) {
-  snapshot();
-  state.tags = state.tags.filter((t) => t.id !== id);
-  state.tasks.forEach((t) => {
-    t.tagIds = t.tagIds.filter((tid) => tid !== id);
-  });
-  persistTags();
-  persistTasks();
-  notify();
-}
-
-/* ---------------- settings ---------------- */
-
-export function updateSettings(patch) {
-  Object.assign(state.settings, patch);
-  persistSettings();
-  notify();
-}
-
-export function updateFilter(patch) {
-  Object.assign(state.settings.filter, patch);
-  persistSettings();
-  notify();
-}
-
-/* ---------------- import / export ---------------- */
-
-export function exportData() {
+export function createVideoClip(media) {
+  const duration = media.kind === "image" ? IMAGE_DEFAULT_DURATION : media.duration || 1;
   return {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    tasks: state.tasks,
-    tags: state.tags,
+    id: makeId(),
+    mediaId: media.id,
+    kind: media.kind,
+    in: 0,
+    out: duration,
+    speed: 1,
+    volume: 1,
+    fit: "contain",
+    filters: { ...DEFAULT_FILTERS },
+    preset: "none",
+    transform: { scale: 1, offsetX: 0, offsetY: 0, rotate: 0, flipH: false, flipV: false },
+    fadeIn: 0,
+    fadeOut: 0,
+    transition: { type: "none", duration: 0.5 },
   };
 }
 
-export function importData(data, mode = "replace") {
-  snapshot();
-  const tasks = (data.tasks || []).map(migrateTask);
-  const tags = data.tags || [];
-  if (mode === "replace") {
-    state.tasks = tasks;
-    state.tags = tags;
+export function createAudioClip(media, start = 0) {
+  return {
+    id: makeId(),
+    mediaId: media.id,
+    kind: "audio",
+    start,
+    in: 0,
+    out: media.duration || 1,
+    volume: 0.8,
+    speed: 1,
+    fadeIn: 0.5,
+    fadeOut: 1,
+  };
+}
+
+export function createText(start = 0) {
+  return {
+    id: makeId(),
+    text: "テキストを入力",
+    start,
+    duration: 3,
+    x: 0.5,
+    y: 0.82,
+    size: 7,
+    color: "#ffffff",
+    background: "rgba(0,0,0,0)",
+    font: "sans-serif",
+    weight: 700,
+    align: "center",
+    shadow: true,
+    animation: "fade",
+  };
+}
+
+export function addClip(clip, index = -1) {
+  commit("クリップを追加", (s) => {
+    if (index < 0 || index >= s.clips.length) s.clips.push(clip);
+    else s.clips.splice(index, 0, clip);
+  });
+  select("clip", clip.id);
+}
+
+export function addAudio(clip) {
+  commit("音声を追加", (s) => s.audio.push(clip));
+  select("audio", clip.id);
+}
+
+export function addText(overlay) {
+  commit("テキストを追加", (s) => s.texts.push(overlay));
+  select("text", overlay.id);
+}
+
+export function removeItem(type, id) {
+  commit("削除", (s) => {
+    if (type === "clip") s.clips = s.clips.filter((c) => c.id !== id);
+    if (type === "audio") s.audio = s.audio.filter((c) => c.id !== id);
+    if (type === "text") s.texts = s.texts.filter((t) => t.id !== id);
+  });
+  ensureSelectionValid();
+}
+
+export function duplicateItem(type, id) {
+  const list = listFor(type);
+  const index = list.findIndex((item) => item.id === id);
+  if (index < 0) return null;
+  const copy = deepClone(list[index]);
+  copy.id = makeId();
+  if (type === "audio") copy.start = copy.start + (copy.out - copy.in);
+  if (type === "text") copy.start = copy.start + copy.duration;
+  commit("複製", (s) => listForState(s, type).splice(index + 1, 0, copy));
+  select(type, copy.id);
+  return copy;
+}
+
+function listForState(s, type) {
+  if (type === "clip") return s.clips;
+  if (type === "audio") return s.audio;
+  return s.texts;
+}
+
+export function updateItem(type, id, patch, { label = "変更", batch = false } = {}) {
+  const apply = (s) => {
+    const item = listForState(s, type).find((x) => x.id === id);
+    if (item) Object.assign(item, patch);
+  };
+  if (batch) {
+    apply(state);
+    emit({ label });
   } else {
-    const existingTagIds = new Set(state.tags.map((t) => t.id));
-    tags.forEach((t) => {
-      if (!existingTagIds.has(t.id)) state.tags.push(t);
-    });
-    const existingTaskIds = new Set(state.tasks.map((t) => t.id));
-    tasks.forEach((t) => {
-      if (existingTaskIds.has(t.id)) t.id = makeId();
-      state.tasks.push(t);
-    });
+    commit(label, apply);
   }
-  persistTasks();
-  persistTags();
-  notify();
+}
+
+export function updateProject(patch, { label = "プロジェクト設定", batch = false } = {}) {
+  if (batch) {
+    Object.assign(state, patch);
+    emit({ label });
+  } else {
+    commit(label, (s) => Object.assign(s, patch));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* レイアウト計算                                                      */
+/* ------------------------------------------------------------------ */
+
+export function clipDuration(clip) {
+  return Math.max(0.05, (clip.out - clip.in) / (clip.speed || 1));
+}
+
+/**
+ * 映像トラックのクリップ配置を求める。
+ * トランジションを持つクリップは直前のクリップと重なる。
+ */
+export function layout(clips = state.clips) {
+  const items = [];
+  clips.forEach((clip, index) => {
+    const dur = clipDuration(clip);
+    let trans = 0;
+    if (index > 0 && clip.transition && clip.transition.type !== "none") {
+      const prev = items[index - 1];
+      trans = clamp(clip.transition.duration || 0, 0, Math.min(dur, prev.dur) * 0.9);
+    }
+    const start = index === 0 ? 0 : items[index - 1].end - trans;
+    items.push({ clip, index, start, end: start + dur, dur, trans });
+  });
+  return items;
+}
+
+export function videoDuration() {
+  const items = layout();
+  return items.length ? items[items.length - 1].end : 0;
+}
+
+export function totalDuration() {
+  let total = videoDuration();
+  state.audio.forEach((clip) => {
+    total = Math.max(total, clip.start + clipDuration(clip));
+  });
+  state.texts.forEach((t) => {
+    total = Math.max(total, t.start + t.duration);
+  });
+  return total;
+}
+
+/** time 時点で描画すべき映像クリップ（トランジション中は2つ返る） */
+export function clipsAt(time) {
+  return layout().filter((item) => time >= item.start - 0.0001 && time < item.end - 0.0001);
+}
+
+export function audioAt(time) {
+  return state.audio.filter(
+    (clip) => time >= clip.start && time < clip.start + clipDuration(clip)
+  );
+}
+
+export function textsAt(time) {
+  return state.texts.filter((t) => time >= t.start && time < t.start + t.duration);
+}
+
+/* ------------------------------------------------------------------ */
+/* 分割                                                                */
+/* ------------------------------------------------------------------ */
+
+export function splitAt(time) {
+  const items = layout();
+  const target = items.find((item) => time > item.start + 0.05 && time < item.end - 0.05);
+  if (!target) return false;
+  const clip = target.clip;
+  const speed = clip.speed || 1;
+  const sourceCut = clip.in + (time - target.start) * speed;
+  const head = deepClone(clip);
+  const tail = deepClone(clip);
+  head.out = sourceCut;
+  head.fadeOut = 0;
+  tail.id = makeId();
+  tail.in = sourceCut;
+  tail.fadeIn = 0;
+  tail.transition = { type: "none", duration: 0.5 };
+  commit("クリップを分割", (s) => {
+    const index = s.clips.findIndex((c) => c.id === clip.id);
+    s.clips.splice(index, 1, head, tail);
+  });
+  select("clip", tail.id);
+  return true;
+}
+
+export function moveClip(fromIndex, toIndex) {
+  const clips = state.clips;
+  if (toIndex < 0 || toIndex >= clips.length || fromIndex === toIndex) return;
+  const [moved] = clips.splice(fromIndex, 1);
+  clips.splice(toIndex, 0, moved);
+  emit({ reorder: true });
+}
+
+/* ------------------------------------------------------------------ */
+/* 保存 / 読み込み                                                     */
+/* ------------------------------------------------------------------ */
+
+let persistTimer = null;
+
+function persistNow() {
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot()));
+  } catch {
+    /* 容量超過などは無視（素材本体は保存しない） */
+  }
+}
+
+/**
+ * 末尾側スロットル。ドラッグ中のように更新が続いても
+ * 一定間隔で必ず保存されるようにする（デバウンスだと保存が先送りされ続ける）。
+ */
+function persistLater() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(persistNow, 800);
+}
+
+/** タブを閉じる直前などに確実に書き出す */
+export function flushPersist() {
+  persistNow();
+}
+
+export function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.media)) return false;
+    restore({ ...emptyProject(), ...data });
+    // ファイル本体はブラウザに保持できないため、再リンクが必要
+    state.media.forEach((m) => {
+      m.missing = true;
+    });
+    emit({ loaded: true });
+    return state.media.length > 0 || state.clips.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function serialize() {
+  return JSON.stringify({ app: "ClipStudio", ...snapshot() }, null, 2);
+}
+
+export function deserialize(json) {
+  const data = JSON.parse(json);
+  if (!data || !Array.isArray(data.clips)) throw new Error("プロジェクト形式が正しくありません");
+  pushUndo();
+  restore({ ...emptyProject(), ...data, media: data.media || [] });
+  state.media.forEach((m) => {
+    m.missing = true;
+  });
+  selection = null;
+  emit({ loaded: true });
+}
+
+export function resetProject() {
+  pushUndo();
+  restore(emptyProject());
+  selection = null;
+  emit({ reset: true });
 }

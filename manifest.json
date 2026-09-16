@@ -1,12 +1,12 @@
 {
-  "name": "TaskMax - 高性能タスク管理",
-  "short_name": "TaskMax",
-  "description": "タグ、優先度、サブタスク、繰り返し、カンバン、カレンダー、ダッシュボードを備えたタスク管理アプリ",
+  "name": "ClipStudio - ブラウザ動画編集",
+  "short_name": "ClipStudio",
+  "description": "カット編集・トランジション・テロップ・BGM・書き出しまでブラウザだけで完結する動画編集アプリ",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f5f6fb",
-  "theme_color": "#ad1457",
+  "background_color": "#0e0f16",
+  "theme_color": "#7c4dff",
   "lang": "ja",
   "icons": [
     {

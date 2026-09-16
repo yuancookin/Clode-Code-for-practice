@@ -3,297 +3,214 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TaskMax - 高性能タスク管理</title>
-<meta name="theme-color" content="#ad1457">
+<title>ClipStudio - ブラウザ動画編集</title>
+<meta name="description" content="インストール不要・アップロード不要。ブラウザだけで動く動画編集アプリ。">
+<meta name="theme-color" content="#7c4dff">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <a href="#main" class="skip-link">メインコンテンツへ</a>
+<body data-theme="dark">
+<a href="#preview-panel" class="skip-link">プレビューへ移動</a>
 
-  <header class="app-header">
-    <div class="brand">
-      <span class="brand-mark">✓</span>
-      <h1>TaskMax</h1>
-    </div>
-
-    <form id="quick-add-form" class="quick-add" autocomplete="off">
-      <input
-        type="text"
-        id="quick-add-input"
-        placeholder="タスクを追加して Enter... (n でフォーカス)"
-        maxlength="200"
-        aria-label="タスクを追加"
-      >
-      <select id="quick-add-priority" aria-label="優先度" title="優先度">
-        <option value="none">優先度なし</option>
-        <option value="low">低</option>
-        <option value="medium">中</option>
-        <option value="high">高</option>
-      </select>
-      <input type="date" id="quick-add-due" aria-label="期限" title="期限">
-      <button type="submit">追加</button>
-    </form>
-
-    <div class="header-actions">
-      <button type="button" id="btn-search" class="icon-btn" title="検索 (/)" aria-label="検索">🔍</button>
-      <button type="button" id="btn-theme" class="icon-btn" title="テーマ切替" aria-label="テーマ切替">🌓</button>
-      <button type="button" id="btn-shortcuts" class="icon-btn" title="ショートカット (?)" aria-label="ショートカット一覧">⌨</button>
-      <div class="menu-wrap">
-        <button type="button" id="btn-menu" class="icon-btn" title="メニュー" aria-label="メニュー">⋮</button>
-        <div id="menu-panel" class="menu-panel hidden">
-          <button type="button" id="btn-export">📤 エクスポート (JSON)</button>
-          <button type="button" id="btn-export-csv">📄 エクスポート (CSV)</button>
-          <button type="button" id="btn-import">📥 インポート</button>
-          <button type="button" id="btn-tags">🏷 タグ管理</button>
-          <button type="button" id="btn-notify">🔔 通知を有効化</button>
-          <input type="file" id="import-file" accept="application/json" hidden>
-        </div>
-      </div>
-    </div>
-  </header>
-
-  <nav class="view-tabs" role="tablist" aria-label="表示切替">
-    <button class="view-tab active" data-view="list" role="tab" aria-selected="true">📋 リスト</button>
-    <button class="view-tab" data-view="board" role="tab" aria-selected="false">🗂 ボード</button>
-    <button class="view-tab" data-view="calendar" role="tab" aria-selected="false">📅 カレンダー</button>
-    <button class="view-tab" data-view="stats" role="tab" aria-selected="false">📊 ダッシュボード</button>
-  </nav>
-
-  <div id="search-bar" class="search-bar hidden">
-    <input type="search" id="search-input" placeholder="タスクを検索..." aria-label="タスク検索">
-    <button type="button" id="search-close" class="icon-btn" aria-label="検索を閉じる">✕</button>
+<header class="app-header">
+  <div class="brand">
+    <span class="brand-mark">▶</span>
+    <h1>ClipStudio</h1>
   </div>
 
-  <main id="main" class="app-main">
-    <aside id="filter-panel" class="filter-panel">
-      <div class="filter-group">
-        <span class="filter-label">状態</span>
-        <div class="chip-row" id="filter-status">
-          <button class="chip active" data-status="all">すべて</button>
-          <button class="chip" data-status="active">未完了</button>
-          <button class="chip" data-status="done">完了</button>
+  <input type="text" id="project-name" class="project-name" value="無題のプロジェクト" maxlength="60" aria-label="プロジェクト名">
+
+  <div class="header-actions">
+    <button type="button" id="btn-import" class="btn primary">＋ メディアを追加</button>
+    <button type="button" id="btn-export" class="btn accent">⬇ 書き出し</button>
+    <button type="button" id="btn-undo" class="icon-btn" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">↩</button>
+    <button type="button" id="btn-redo" class="icon-btn" title="やり直す (Ctrl+Shift+Z)" aria-label="やり直す">↪</button>
+    <button type="button" id="btn-theme" class="icon-btn" title="テーマ切替" aria-label="テーマ切替">🌓</button>
+    <button type="button" id="btn-shortcuts" class="icon-btn" title="ショートカット (?)" aria-label="ショートカット一覧">⌨</button>
+    <div class="menu-wrap">
+      <button type="button" id="btn-menu" class="icon-btn" title="メニュー" aria-label="メニュー">⋮</button>
+      <div id="menu-panel" class="menu-panel hidden">
+        <button type="button" id="btn-project-new">🆕 新規プロジェクト</button>
+        <button type="button" id="btn-project-save">💾 プロジェクトを保存 (JSON)</button>
+        <button type="button" id="btn-project-load">📂 プロジェクトを開く</button>
+        <button type="button" id="btn-snapshot">📸 現在のフレームを PNG 保存</button>
+        <button type="button" id="btn-sample">🎬 サンプル素材を生成</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="workspace">
+  <!-- ------------- メディアライブラリ ------------- -->
+  <section class="panel library" aria-label="メディアライブラリ">
+    <div class="panel-head">
+      <h2>メディア</h2>
+      <span id="library-count" class="pill">0</span>
+    </div>
+    <div id="dropzone" class="dropzone">
+      <p><strong>ここにドラッグ＆ドロップ</strong></p>
+      <p class="muted">動画 / 音声 / 画像に対応（端末外には送信されません）</p>
+      <button type="button" id="btn-import-2" class="btn ghost">ファイルを選択</button>
+    </div>
+    <ul id="media-list" class="media-list"></ul>
+    <p class="hint">クリップをクリックで選択、＋ でタイムラインへ追加</p>
+  </section>
+
+  <!-- ------------- プレビュー ------------- -->
+  <section class="panel preview" id="preview-panel" aria-label="プレビュー">
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <canvas id="preview-canvas" width="1280" height="720"></canvas>
+        <div id="stage-empty" class="stage-empty">
+          <p>メディアを追加して編集を始めましょう</p>
         </div>
       </div>
-      <div class="filter-group">
-        <span class="filter-label">期限</span>
-        <div class="chip-row" id="filter-range">
-          <button class="chip active" data-range="all">すべて</button>
-          <button class="chip" data-range="today">今日</button>
-          <button class="chip" data-range="week">今週</button>
-          <button class="chip" data-range="overdue">期限切れ</button>
+    </div>
+
+    <div class="transport">
+      <div class="transport-left">
+        <button type="button" id="btn-to-start" class="icon-btn" title="先頭へ (Home)" aria-label="先頭へ">⏮</button>
+        <button type="button" id="btn-prev-frame" class="icon-btn" title="1コマ戻る (←)" aria-label="1コマ戻る">◀|</button>
+        <button type="button" id="btn-play" class="icon-btn play" title="再生 / 一時停止 (Space)" aria-label="再生">▶</button>
+        <button type="button" id="btn-next-frame" class="icon-btn" title="1コマ進む (→)" aria-label="1コマ進む">|▶</button>
+        <button type="button" id="btn-to-end" class="icon-btn" title="末尾へ (End)" aria-label="末尾へ">⏭</button>
+        <button type="button" id="btn-loop" class="icon-btn" title="ループ再生" aria-label="ループ再生" aria-pressed="false">🔁</button>
+      </div>
+      <div class="timecode">
+        <span id="tc-current">00:00.00</span>
+        <span class="muted">/</span>
+        <span id="tc-total" class="muted">00:00.00</span>
+      </div>
+      <div class="transport-right">
+        <button type="button" id="btn-mute" class="icon-btn" title="ミュート (M)" aria-label="ミュート" aria-pressed="false">🔊</button>
+        <input type="range" id="master-volume" min="0" max="100" value="100" aria-label="音量">
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------- インスペクタ ------------- -->
+  <aside class="panel inspector" aria-label="インスペクタ">
+    <div class="panel-head">
+      <h2 id="inspector-title">プロジェクト設定</h2>
+    </div>
+    <div id="inspector-body" class="inspector-body"></div>
+  </aside>
+
+  <!-- ------------- タイムライン ------------- -->
+  <section class="panel timeline-panel" aria-label="タイムライン">
+    <div class="timeline-toolbar">
+      <button type="button" id="btn-split" class="btn ghost" title="再生位置で分割 (S)">✂ 分割</button>
+      <button type="button" id="btn-duplicate" class="btn ghost" title="複製 (Ctrl+D)">⧉ 複製</button>
+      <button type="button" id="btn-delete" class="btn ghost danger" title="削除 (Delete)">🗑 削除</button>
+      <span class="sep"></span>
+      <button type="button" id="btn-add-text" class="btn ghost" title="テキストを追加 (T)">🅣 テキスト</button>
+      <button type="button" id="btn-add-transition" class="btn ghost" title="選択クリップの前にトランジション">⇄ トランジション</button>
+      <span class="sep"></span>
+      <label class="toggle"><input type="checkbox" id="chk-snap" checked> スナップ</label>
+      <span class="spacer"></span>
+      <button type="button" id="btn-zoom-out" class="icon-btn" title="縮小 (-)" aria-label="縮小">－</button>
+      <span id="zoom-label" class="pill">60px/s</span>
+      <button type="button" id="btn-zoom-in" class="icon-btn" title="拡大 (+)" aria-label="拡大">＋</button>
+      <button type="button" id="btn-zoom-fit" class="btn ghost" title="全体を表示 (F)">全体</button>
+    </div>
+
+    <div class="timeline-scroll" id="timeline-scroll">
+      <div class="timeline-inner" id="timeline-inner">
+        <div class="ruler" id="ruler"></div>
+        <div class="track-row">
+          <div class="track-label">🎞 映像</div>
+          <div class="track" id="track-video" data-track="video"></div>
         </div>
-      </div>
-      <div class="filter-group">
-        <span class="filter-label">優先度</span>
-        <div class="chip-row" id="filter-priority">
-          <button class="chip active" data-priority="all">すべて</button>
-          <button class="chip priority-high" data-priority="high">高</button>
-          <button class="chip priority-medium" data-priority="medium">中</button>
-          <button class="chip priority-low" data-priority="low">低</button>
+        <div class="track-row">
+          <div class="track-label">🎵 音声</div>
+          <div class="track" id="track-audio" data-track="audio"></div>
         </div>
+        <div class="track-row">
+          <div class="track-label">🅣 テキスト</div>
+          <div class="track" id="track-text" data-track="text"></div>
+        </div>
+        <div class="playhead" id="playhead"><div class="playhead-grip"></div></div>
       </div>
-      <div class="filter-group">
-        <span class="filter-label">タグ</span>
-        <select id="filter-tag">
-          <option value="all">すべてのタグ</option>
-          <option value="none">タグなし</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <span class="filter-label">並び替え</span>
-        <select id="sort-by">
-          <option value="manual">手動（ドラッグ）</option>
-          <option value="due">期限順</option>
-          <option value="priority">優先度順</option>
-          <option value="created">作成日順</option>
-          <option value="alpha">名前順</option>
-        </select>
-      </div>
-      <label class="check-row">
-        <input type="checkbox" id="toggle-group-tag">
-        タグでグループ表示
+    </div>
+  </section>
+</main>
+
+<!-- ------------- ダイアログ ------------- -->
+<dialog id="export-dialog" class="dialog">
+  <form method="dialog" class="dialog-body">
+    <h2>動画を書き出す</h2>
+    <div class="field-grid">
+      <label>形式
+        <select id="export-format"></select>
       </label>
-      <label class="check-row">
-        <input type="checkbox" id="toggle-select-mode">
-        複数選択モード
-      </label>
-      <button type="button" id="btn-clear-completed" class="link-btn danger">完了済みを削除</button>
-    </aside>
-
-    <section class="view-content">
-      <div id="bulk-toolbar" class="bulk-toolbar hidden">
-        <span id="bulk-count">0件選択中</span>
-        <button type="button" data-bulk="done">✓ 完了にする</button>
-        <button type="button" data-bulk="todo">↺ 未完了に戻す</button>
-        <select id="bulk-priority">
-          <option value="">優先度を設定...</option>
-          <option value="high">高</option>
-          <option value="medium">中</option>
-          <option value="low">低</option>
-          <option value="none">なし</option>
+      <label>解像度
+        <select id="export-scale">
+          <option value="1">100%</option>
+          <option value="0.75">75%</option>
+          <option value="0.5">50%</option>
         </select>
-        <button type="button" data-bulk="delete" class="danger">🗑 削除</button>
-        <button type="button" id="bulk-cancel">キャンセル</button>
-      </div>
-
-      <div id="view-list" class="view-panel">
-        <ul id="todo-list" class="todo-list"></ul>
-        <div class="footer">
-          <span id="items-left">0 件</span>
-          <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
-          <span id="progress-label">0%</span>
-        </div>
-      </div>
-
-      <div id="view-board" class="view-panel hidden">
-        <div class="board" id="board-columns"></div>
-      </div>
-
-      <div id="view-calendar" class="view-panel hidden">
-        <div class="calendar-header">
-          <button type="button" id="cal-prev" class="icon-btn" aria-label="前の月">◀</button>
-          <h2 id="cal-title"></h2>
-          <button type="button" id="cal-next" class="icon-btn" aria-label="次の月">▶</button>
-          <button type="button" id="cal-today" class="link-btn">今日</button>
-        </div>
-        <div class="calendar-grid" id="calendar-grid"></div>
-      </div>
-
-      <div id="view-stats" class="view-panel hidden">
-        <div class="stats-grid" id="stats-grid"></div>
-      </div>
-    </section>
-  </main>
-
-  <!-- Task detail modal -->
-  <div id="task-modal" class="modal-overlay hidden">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-label">
-      <div class="modal-header">
-        <h2 id="modal-title-label">タスクの詳細</h2>
-        <button type="button" id="modal-close" class="icon-btn" aria-label="閉じる">✕</button>
-      </div>
-      <div class="modal-body">
-        <label class="field-label" for="field-title">タイトル</label>
-        <input type="text" id="field-title" maxlength="200">
-
-        <label class="field-label" for="field-notes">メモ</label>
-        <textarea id="field-notes" rows="3" maxlength="2000"></textarea>
-
-        <div class="field-row">
-          <div>
-            <label class="field-label" for="field-status">状態</label>
-            <select id="field-status">
-              <option value="todo">未着手</option>
-              <option value="doing">進行中</option>
-              <option value="done">完了</option>
-            </select>
-          </div>
-          <div>
-            <label class="field-label" for="field-priority">優先度</label>
-            <select id="field-priority">
-              <option value="none">なし</option>
-              <option value="low">低</option>
-              <option value="medium">中</option>
-              <option value="high">高</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="field-row">
-          <div>
-            <label class="field-label" for="field-due-date">期限日</label>
-            <input type="date" id="field-due-date">
-          </div>
-          <div>
-            <label class="field-label" for="field-due-time">期限時刻</label>
-            <input type="time" id="field-due-time">
-          </div>
-        </div>
-
-        <div class="field-row">
-          <div>
-            <label class="field-label" for="field-recurrence">繰り返し</label>
-            <select id="field-recurrence">
-              <option value="">なし</option>
-              <option value="daily">毎日</option>
-              <option value="weekly">毎週</option>
-              <option value="monthly">毎月</option>
-            </select>
-          </div>
-          <div>
-            <label class="field-label">&nbsp;</label>
-            <label class="check-row"><input type="checkbox" id="field-pinned"> ピン留め</label>
-          </div>
-        </div>
-
-        <label class="field-label">タグ</label>
-        <div id="field-tags" class="field-tags"></div>
-
-        <label class="field-label">サブタスク <span id="subtask-progress"></span></label>
-        <ul id="subtask-list" class="subtask-list"></ul>
-        <form id="subtask-form" class="subtask-form">
-          <input type="text" id="subtask-input" placeholder="サブタスクを追加..." maxlength="200">
-          <button type="submit">追加</button>
-        </form>
-
-        <p class="meta-line" id="modal-meta"></p>
-      </div>
-      <div class="modal-footer">
-        <button type="button" id="modal-delete" class="danger">🗑 削除</button>
-        <div class="spacer"></div>
-        <button type="button" id="modal-cancel">キャンセル</button>
-        <button type="button" id="modal-save" class="primary">保存</button>
-      </div>
+      </label>
+      <label>フレームレート
+        <select id="export-fps">
+          <option value="24">24 fps</option>
+          <option value="30" selected>30 fps</option>
+          <option value="60">60 fps</option>
+        </select>
+      </label>
+      <label>画質
+        <select id="export-quality">
+          <option value="2500000">低 (2.5 Mbps)</option>
+          <option value="6000000" selected>中 (6 Mbps)</option>
+          <option value="12000000">高 (12 Mbps)</option>
+          <option value="20000000">最高 (20 Mbps)</option>
+        </select>
+      </label>
     </div>
-  </div>
-
-  <!-- Tag manager modal -->
-  <div id="tag-modal" class="modal-overlay hidden">
-    <div class="modal modal-sm" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h2>タグ管理</h2>
-        <button type="button" id="tag-modal-close" class="icon-btn" aria-label="閉じる">✕</button>
-      </div>
-      <div class="modal-body">
-        <ul id="tag-list" class="tag-list"></ul>
-        <form id="tag-form" class="tag-form">
-          <input type="color" id="tag-color" value="#4a4de7">
-          <input type="text" id="tag-name" placeholder="新しいタグ名" maxlength="30" autocomplete="off">
-          <button type="submit">追加</button>
-        </form>
-      </div>
+    <p class="note" id="export-note"></p>
+    <div id="export-progress" class="progress hidden">
+      <div class="progress-bar"><span id="export-bar"></span></div>
+      <p id="export-status" class="muted">準備中...</p>
     </div>
-  </div>
-
-  <!-- Shortcuts help modal -->
-  <div id="shortcuts-modal" class="modal-overlay hidden">
-    <div class="modal modal-sm" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h2>キーボードショートカット</h2>
-        <button type="button" id="shortcuts-close" class="icon-btn" aria-label="閉じる">✕</button>
-      </div>
-      <div class="modal-body">
-        <dl class="shortcut-list">
-          <dt><kbd>n</kbd></dt><dd>新規タスク入力にフォーカス</dd>
-          <dt><kbd>/</kbd></dt><dd>検索を開く</dd>
-          <dt><kbd>1</kbd>-<kbd>4</kbd></dt><dd>リスト/ボード/カレンダー/ダッシュボード切替</dd>
-          <dt><kbd>Esc</kbd></dt><dd>モーダルや検索を閉じる</dd>
-          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>元に戻す</dd>
-          <dt><kbd>?</kbd></dt><dd>このヘルプを表示</dd>
-        </dl>
-      </div>
+    <div class="dialog-actions">
+      <button type="button" id="export-cancel" class="btn ghost">閉じる</button>
+      <button type="button" id="export-start" class="btn accent">書き出しを開始</button>
     </div>
-  </div>
+  </form>
+</dialog>
 
-  <div id="toast" class="toast hidden">
-    <span id="toast-message"></span>
-    <button type="button" id="toast-undo">元に戻す</button>
-  </div>
+<dialog id="shortcuts-dialog" class="dialog">
+  <form method="dialog" class="dialog-body">
+    <h2>キーボードショートカット</h2>
+    <ul class="shortcut-list">
+      <li><kbd>Space</kbd> 再生 / 一時停止</li>
+      <li><kbd>←</kbd> <kbd>→</kbd> 1コマ移動（<kbd>Shift</kbd> で1秒）</li>
+      <li><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd> 逆再生 / 停止 / 再生（連打で倍速）</li>
+      <li><kbd>Home</kbd> <kbd>End</kbd> 先頭 / 末尾へ</li>
+      <li><kbd>S</kbd> 再生位置で分割</li>
+      <li><kbd>T</kbd> テキストを追加</li>
+      <li><kbd>Delete</kbd> 選択中のクリップを削除</li>
+      <li><kbd>Ctrl</kbd>+<kbd>D</kbd> 複製</li>
+      <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> 元に戻す / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> やり直す</li>
+      <li><kbd>M</kbd> ミュート</li>
+      <li><kbd>+</kbd> <kbd>-</kbd> タイムライン拡大 / 縮小、<kbd>F</kbd> 全体表示</li>
+      <li><kbd>?</kbd> このヘルプ</li>
+    </ul>
+    <div class="dialog-actions">
+      <button type="submit" class="btn primary">閉じる</button>
+    </div>
+  </form>
+</dialog>
 
-  <div id="day-popover" class="day-popover hidden"></div>
+<div id="toast" class="toast hidden">
+  <span id="toast-message"></span>
+  <button type="button" id="toast-undo" class="toast-undo hidden">元に戻す</button>
+</div>
 
-  <script type="module" src="js/main.js"></script>
+<input type="file" id="file-input" accept="video/*,audio/*,image/*" multiple hidden>
+<input type="file" id="project-input" accept="application/json" hidden>
+<div id="media-pool" class="media-pool" aria-hidden="true"></div>
+
+<script type="module" src="js/main.js"></script>
 </body>
 </html>
