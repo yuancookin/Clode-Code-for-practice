@@ -1,4 +1,4 @@
-import { formatTime, clamp } from "./utils.js";
+import { formatTime, formatBytes, clamp } from "./utils.js";
 import {
   getState,
   getSelection,
@@ -30,6 +30,7 @@ import * as timeline from "./timeline.js";
 import * as inspector from "./inspector.js";
 import * as library from "./library.js";
 import { supportedFormats, exportAndDownload, cancelExport, isExporting, snapshotPNG } from "./export.js";
+import * as api from "./api.js";
 import { showToast } from "./toast.js";
 
 const $ = (id) => document.getElementById(id);
@@ -222,7 +223,12 @@ projectInput.addEventListener("change", async () => {
   try {
     deserialize(await file.text());
     player.seek(0);
-    showToast("プロジェクトを読み込みました。素材を再リンクしてください");
+    showToast("プロジェクトを読み込みました");
+    const count = api.isOnline() ? await library.restoreFromServer() : 0;
+    if (count) showToast(`${count} 個の素材をサーバーから復元しました`);
+    else if (getState().media.some((media) => media.missing)) {
+      showToast("素材ファイルを再リンクしてください（🔗 ボタン）", { duration: 7000 });
+    }
   } catch (error) {
     showToast(error.message || "読み込みに失敗しました");
   }
@@ -327,6 +333,105 @@ exportStart.addEventListener("click", async () => {
     exportStart.disabled = false;
     exportCancel.textContent = "閉じる";
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* サーバー連携                                                        */
+/* ------------------------------------------------------------------ */
+
+const serverDialog = $("server-dialog");
+const serverDot = $("server-dot");
+const serverStatus = $("server-status");
+const serverUrlInput = $("server-url");
+const serverFiles = $("server-files");
+const serverCount = $("server-count");
+const autoSyncToggle = $("server-autosync");
+
+function setServerStatus(message, state) {
+  serverStatus.textContent = message;
+  serverStatus.className = `server-status ${state || ""}`.trim();
+  serverDot.className = `server-dot ${state === "online" ? "online" : state === "error" ? "error" : ""}`.trim();
+  $("btn-server").title = state === "online" ? `サーバー連携: 接続済み (${api.getBase() || "同じサーバー"})` : "サーバー連携: 未接続";
+}
+
+async function connectServer({ quiet = false } = {}) {
+  setServerStatus("接続を確認しています...", "");
+  try {
+    const info = await api.ping();
+    const where = api.getBase() || location.origin;
+    setServerStatus(`接続済み: ${where}（上限 ${info.max_upload_mb}MB / 保存先 ${info.upload_dir}）`, "online");
+    await refreshServerFiles();
+    return true;
+  } catch (error) {
+    // URL を設定していないのに繋がらないのは「サーバーを使っていない」だけなので警告色にしない
+    const configured = Boolean(api.getBase());
+    setServerStatus(
+      configured ? error.message || "接続できません" : "未接続（バックエンドなしでも編集できます）",
+      configured ? "error" : ""
+    );
+    serverFiles.innerHTML = "";
+    serverCount.textContent = "0";
+    if (!quiet) showToast(error.message || "サーバーに接続できません");
+    return false;
+  }
+}
+
+async function refreshServerFiles() {
+  try {
+    const files = await api.listFiles();
+    serverCount.textContent = String(files.length);
+    serverFiles.innerHTML = "";
+    files.forEach((entry) => {
+      const row = document.createElement("li");
+      row.className = "server-file";
+      const icon = document.createElement("span");
+      icon.textContent = entry.kind === "image" ? "🖼" : entry.kind === "audio" ? "🎵" : "🎞";
+      row.appendChild(icon);
+
+      const info = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "server-file-name";
+      name.textContent = entry.original_name || entry.name;
+      name.title = entry.name;
+      const meta = document.createElement("div");
+      meta.className = "server-file-meta";
+      meta.textContent = `${formatBytes(entry.size)} ・ ${new Date(entry.uploaded_at).toLocaleString()}`;
+      info.appendChild(name);
+      info.appendChild(meta);
+      row.appendChild(info);
+
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "btn ghost";
+      add.textContent = "＋ 読み込む";
+      add.addEventListener("click", () => library.importFromServer(entry));
+      row.appendChild(add);
+      serverFiles.appendChild(row);
+    });
+  } catch (error) {
+    showToast(error.message || "一覧を取得できませんでした");
+  }
+}
+
+$("btn-server").addEventListener("click", () => {
+  serverUrlInput.value = api.getBase();
+  autoSyncToggle.checked = api.isAutoSync();
+  serverDialog.showModal();
+  connectServer({ quiet: true });
+});
+$("server-connect").addEventListener("click", () => {
+  api.setBase(serverUrlInput.value);
+  connectServer();
+});
+$("server-refresh").addEventListener("click", refreshServerFiles);
+$("server-sync-pending").addEventListener("click", async () => {
+  if (!api.isOnline() && !(await connectServer())) return;
+  await library.syncPending();
+  refreshServerFiles();
+});
+autoSyncToggle.addEventListener("change", () => {
+  api.setAutoSync(autoSyncToggle.checked);
+  showToast(autoSyncToggle.checked ? "取り込んだ素材を自動アップロードします" : "自動アップロードをオフにしました");
 });
 
 /* ------------------------------------------------------------------ */
@@ -493,8 +598,22 @@ $("btn-undo").disabled = true;
 $("btn-redo").disabled = true;
 
 if (restored) {
-  showToast("前回のプロジェクトを復元しました。素材ファイルを再リンクしてください", { duration: 7000 });
+  showToast("前回のプロジェクトを復元しました", { duration: 5000 });
 }
+
+// サーバーが使えるなら、保存済みの素材を自動で読み直す
+connectServer({ quiet: true }).then(async (ok) => {
+  if (!ok) {
+    if (getState().media.some((media) => media.missing)) {
+      showToast("素材ファイルを再リンクしてください（🔗 ボタン）", { duration: 7000 });
+    }
+    return;
+  }
+  const count = await library.restoreFromServer();
+  if (count) showToast(`${count} 個の素材をサーバーから復元しました`);
+  const remaining = getState().media.filter((media) => media.missing && !media.remoteUrl).length;
+  if (remaining) showToast(`${remaining} 個の素材は再リンクが必要です（🔗 ボタン）`, { duration: 7000 });
+});
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

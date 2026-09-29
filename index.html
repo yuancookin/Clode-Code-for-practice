@@ -24,6 +24,9 @@
   <div class="header-actions">
     <button type="button" id="btn-import" class="btn primary">＋ メディアを追加</button>
     <button type="button" id="btn-export" class="btn accent">⬇ 書き出し</button>
+    <button type="button" id="btn-server" class="icon-btn server-btn" title="サーバー連携" aria-label="サーバー連携">
+      <span class="server-dot" id="server-dot"></span>☁
+    </button>
     <button type="button" id="btn-undo" class="icon-btn" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">↩</button>
     <button type="button" id="btn-redo" class="icon-btn" title="やり直す (Ctrl+Shift+Z)" aria-label="やり直す">↪</button>
     <button type="button" id="btn-theme" class="icon-btn" title="テーマ切替" aria-label="テーマ切替">🌓</button>
@@ -175,6 +178,41 @@
     <div class="dialog-actions">
       <button type="button" id="export-cancel" class="btn ghost">閉じる</button>
       <button type="button" id="export-start" class="btn accent">書き出しを開始</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="server-dialog" class="dialog wide">
+  <form method="dialog" class="dialog-body">
+    <h2>サーバー連携</h2>
+    <p class="note">
+      素材をバックエンド (<code>uploads/</code>) に保存しておくと、次に開いたときに自動で読み込まれます。
+      エディタと API を同じサーバーから配信している場合は、URL は空のままで構いません。
+    </p>
+
+    <div class="server-row">
+      <label class="grow">API の URL
+        <input type="text" id="server-url" placeholder="（同じサーバー）例: http://127.0.0.1:8000" spellcheck="false">
+      </label>
+      <button type="button" id="server-connect" class="btn primary">接続を確認</button>
+    </div>
+    <p id="server-status" class="server-status">未接続</p>
+
+    <label class="insp-check">
+      <input type="checkbox" id="server-autosync" checked>
+      取り込んだ素材を自動でアップロードする
+    </label>
+
+    <div class="server-actions">
+      <button type="button" id="server-sync-pending" class="btn ghost">未保存の素材をアップロード</button>
+      <button type="button" id="server-refresh" class="btn ghost">一覧を更新</button>
+    </div>
+
+    <h3 class="server-subtitle">サーバー上の素材 <span id="server-count" class="pill">0</span></h3>
+    <ul id="server-files" class="server-files"></ul>
+
+    <div class="dialog-actions">
+      <button type="submit" class="btn primary">閉じる</button>
     </div>
   </form>
 </dialog>

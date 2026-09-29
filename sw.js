@@ -39,10 +39,14 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// API とアップロード済み素材はキャッシュしない（常に最新を取りに行く）
+const NETWORK_ONLY = [/^\/upload/, /^\/files/, /^\/uploads\//, /^\/api/, /^\/docs/, /^\/openapi\.json/];
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+  if (NETWORK_ONLY.some((pattern) => pattern.test(url.pathname))) return;
   event.respondWith(
     caches.match(event.request).then(
       (cached) =>

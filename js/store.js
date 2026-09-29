@@ -206,6 +206,9 @@ export function addMedia(entry) {
     type: entry.type || "",
     thumbnail: entry.thumbnail || "",
     missing: false,
+    // サーバーに保存済みなら、その場所を覚えておく（再読み込み時に自動で復元する）
+    remoteUrl: entry.remoteUrl || "",
+    remoteName: entry.remoteName || "",
     ...entry.overrides,
   };
   commit("メディアを追加", (s) => s.media.push(media));
@@ -214,6 +217,15 @@ export function addMedia(entry) {
 
 export function getMedia(id) {
   return state.media.find((m) => m.id === id) || null;
+}
+
+/** メディアの情報を書き換える（履歴には残さない） */
+export function patchMedia(id, patch) {
+  const media = state.media.find((m) => m.id === id);
+  if (!media) return null;
+  Object.assign(media, patch);
+  emit({ media: true });
+  return media;
 }
 
 export function removeMedia(id) {

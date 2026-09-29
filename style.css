@@ -951,6 +951,143 @@ kbd {
   font-family: ui-monospace, monospace;
 }
 
+/* ---------------- サーバー連携 ---------------- */
+
+.server-btn {
+  position: relative;
+}
+.server-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted, #8a8da8);
+  border: 1px solid var(--surface);
+}
+.server-dot.online {
+  background: #2fbf71;
+}
+.server-dot.error {
+  background: var(--danger);
+}
+
+.dialog.wide {
+  max-width: 560px;
+}
+.server-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 14px;
+}
+.server-row .grow {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.server-row input {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px;
+  width: 100%;
+}
+.server-status {
+  font-size: 12.5px;
+  margin: 10px 0;
+  color: var(--text-muted);
+}
+.server-status.online {
+  color: #2fbf71;
+}
+.server-status.error {
+  color: var(--danger);
+}
+.server-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 4px;
+  flex-wrap: wrap;
+}
+.server-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 16px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.server-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 230px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.server-files:empty::after {
+  content: "サーバーに素材がありません";
+  display: block;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.server-file {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.server-file:last-child {
+  border-bottom: none;
+}
+.server-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.server-file-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.media-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.sync-badge {
+  font-size: 10px;
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--surface-deep);
+  color: var(--text-muted);
+}
+.sync-badge.synced {
+  background: rgba(47, 191, 113, 0.18);
+  color: #2fbf71;
+}
+.sync-badge.uploading {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.sync-badge.error {
+  background: var(--danger-bg, rgba(224, 61, 76, 0.15));
+  color: var(--danger);
+}
+
 /* ---------------- トースト ---------------- */
 
 .toast {

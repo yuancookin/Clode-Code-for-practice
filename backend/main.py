@@ -16,6 +16,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -113,13 +114,22 @@ def guess_content_type(upload: UploadFile, kind: str, extension: str) -> str:
     return f"{kind}/{extension.lstrip('.')}"
 
 
+# storage_name() が付けた "20260929-065018_6318353f_" の接頭辞
+STORAGE_PREFIX = re.compile(r"^\d{8}-\d{6}_[0-9a-f]{8}_")
+
+
+def display_name(stored: str) -> str:
+    """保存名から日時・ランダム部分を外して、読みやすい名前に戻す。"""
+    return STORAGE_PREFIX.sub("", stored) or stored
+
+
 def describe(path: Path, *, original_name: str | None = None, content_type: str | None = None) -> StoredFile:
     stat = path.stat()
     extension = path.suffix.lower()
     kind = kind_of(extension) or "file"
     return StoredFile(
         name=path.name,
-        original_name=original_name or path.name,
+        original_name=original_name or display_name(path.name),
         kind=kind,
         content_type=content_type or f"{kind}/{extension.lstrip('.')}",
         size=stat.st_size,
@@ -144,14 +154,23 @@ async def save_upload(upload: UploadFile, destination: Path) -> int:
     return written
 
 
-@app.get("/", tags=["meta"])
-async def root() -> dict:
+@app.get("/", include_in_schema=False)
+async def root() -> FileResponse:
+    """エディタ本体を返す（API の情報は /api）。"""
+    index = BASE_DIR / "index.html"
+    if not index.is_file():
+        raise HTTPException(status_code=404, detail="index.html が見つかりません")
+    return FileResponse(index)
+
+
+@app.get("/api", tags=["meta"])
+async def api_info() -> dict:
     return {
         "name": "ClipStudio API",
         "upload_dir": str(UPLOAD_DIR),
         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
         "allowed_extensions": sorted(ALLOWED_EXTENSIONS),
-        "endpoints": {"upload": "POST /upload", "list": "GET /files"},
+        "endpoints": {"upload": "POST /upload", "list": "GET /files", "editor": "GET /"},
     }
 
 
@@ -222,3 +241,35 @@ async def list_files() -> FileListResponse:
     entries = [path for path in UPLOAD_DIR.iterdir() if path.is_file() and not path.name.startswith(".")]
     entries.sort(key=lambda path: path.stat().st_mtime, reverse=True)
     return FileListResponse(files=[describe(path) for path in entries])
+
+
+# ------------------------------------------------------------------ #
+# フロントエンド配信                                                   #
+# ------------------------------------------------------------------ #
+# 同じサーバーからエディタを配信すると、API と同一オリジンになり
+# CORS もエンドポイントの設定も不要で動く。
+# リポジトリ全体を公開しないよう、配信するファイルは明示的に限定する。
+
+FRONTEND_FILES = {"index.html", "style.css", "sw.js", "manifest.json"}
+FRONTEND_DIRS = ("js", "icons", "fonts")
+
+for directory in FRONTEND_DIRS:
+    path = BASE_DIR / directory
+    if path.is_dir():
+        app.mount(f"/{directory}", StaticFiles(directory=path), name=f"frontend-{directory}")
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def frontend_index() -> FileResponse:
+    index = BASE_DIR / "index.html"
+    if not index.is_file():
+        raise HTTPException(status_code=404, detail="index.html が見つかりません")
+    return FileResponse(index)
+
+
+@app.get("/{filename}", include_in_schema=False)
+async def frontend_asset(filename: str) -> FileResponse:
+    if filename not in FRONTEND_FILES:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(BASE_DIR / filename)
