@@ -1270,6 +1270,37 @@ kbd {
   flex-shrink: 0;
 }
 
+.ai-optin {
+  margin: 4px 0 2px;
+  font-size: 12.5px;
+}
+.ai-cost {
+  font-size: 9.5px;
+  border-radius: 999px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-weight: 700;
+}
+.ai-cost.free {
+  background: rgba(47, 191, 113, 0.22);
+  color: #2fbf71;
+}
+.ai-cost.paid {
+  background: rgba(255, 193, 7, 0.22);
+  color: #d89b12;
+}
+.btn.accent .ai-cost.free {
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+.ai-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 6px 0;
+}
+
 /* ---------------- トースト ---------------- */
 
 .toast {

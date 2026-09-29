@@ -66,8 +66,8 @@ export function titles(tone) {
   });
 }
 
-export function transcribe(media, { language = null, offset = 0 } = {}) {
-  return call("/ai/transcribe", { media, language, offset, polish: true });
+export function transcribe(media, { language = null, offset = 0, polish = false } = {}) {
+  return call("/ai/transcribe", { media, language, offset, polish });
 }
 
 export function highlights({ count = 3, targetDuration = 30 } = {}) {

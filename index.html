@@ -187,6 +187,10 @@
   <form method="dialog" class="dialog-body">
     <h2>AI アシスタント</h2>
     <p id="ai-status" class="server-status">状態を確認しています...</p>
+    <label class="insp-check ai-optin">
+      <input type="checkbox" id="ai-allow-api">
+      Claude API を使う（課金あり・既定はオフ）
+    </label>
 
     <nav class="ai-tabs" role="tablist">
       <button type="button" class="ai-tab active" data-tab="edit" role="tab">🎬 編集する</button>
@@ -200,7 +204,8 @@
       <textarea id="ai-instruction" rows="3" placeholder="例: 最初の3秒をカットして、全体をセピアに。冒頭に「旅の記録」というテロップを入れて"></textarea>
       <div class="chips" id="ai-examples"></div>
       <div class="ai-actions">
-        <button type="button" id="ai-run-edit" class="btn accent">指示を実行</button>
+        <button type="button" id="ai-run-edit" class="btn accent">指示を実行<span class="ai-cost free">無料</span></button>
+        <button type="button" id="ai-ask-claude" class="btn ghost hidden">Claude に聞く<span class="ai-cost paid">API</span></button>
         <button type="button" id="ai-undo" class="btn ghost hidden">↩ この編集を取り消す</button>
       </div>
       <div id="ai-edit-result" class="ai-result"></div>
@@ -211,15 +216,16 @@
       <label class="ai-field">雰囲気の指定（任意）
         <input type="text" id="ai-tone" placeholder="例: 落ち着いた旅行 vlog 風 / 元気な商品紹介">
       </label>
+      <p class="note">この機能は Claude API を使います（1回あたり数円程度）。</p>
       <div class="ai-actions">
-        <button type="button" id="ai-run-titles" class="btn accent">タイトル・説明文を作る</button>
+        <button type="button" id="ai-run-titles" class="btn accent">タイトル・説明文を作る<span class="ai-cost paid">API</span></button>
       </div>
       <div id="ai-titles-result" class="ai-result"></div>
     </section>
 
     <!-- 字幕 -->
     <section class="ai-pane hidden" data-pane="captions">
-      <p class="note">サーバーに保存済みの素材を文字起こしして、テロップとして配置します。</p>
+      <p class="note">サーバーに保存済みの素材を、端末内の音声認識 (faster-whisper) で文字起こしします。ここまでは API を使いません。</p>
       <div class="server-row">
         <label class="grow">対象の素材
           <select id="ai-media"></select>
@@ -232,8 +238,12 @@
           </select>
         </label>
       </div>
+      <label class="insp-check">
+        <input type="checkbox" id="ai-polish">
+        Claude で読みやすく整える（API を使用）
+      </label>
       <div class="ai-actions">
-        <button type="button" id="ai-run-transcribe" class="btn accent">文字起こしして字幕を作る</button>
+        <button type="button" id="ai-run-transcribe" class="btn accent">文字起こしして字幕を作る<span class="ai-cost free">無料</span></button>
         <button type="button" id="ai-add-captions" class="btn ghost hidden">タイムラインに追加</button>
       </div>
       <div id="ai-captions-result" class="ai-result"></div>
@@ -241,7 +251,7 @@
 
     <!-- ハイライト -->
     <section class="ai-pane hidden" data-pane="highlights">
-      <p class="note">文字起こしの結果から、短尺動画に向く区間を選びます。先に「字幕」タブで文字起こしを実行してください。</p>
+      <p class="note">文字起こしの結果から短尺動画に向く区間を選びます。先に「字幕」タブで文字起こしを実行してください。ローカル抽出は発話量から機械的に選ぶ簡易版です。</p>
       <div class="server-row">
         <label>本数
           <select id="ai-highlight-count">
@@ -257,7 +267,8 @@
         </label>
       </div>
       <div class="ai-actions">
-        <button type="button" id="ai-run-highlights" class="btn accent">見どころを抽出</button>
+        <button type="button" id="ai-run-highlights" class="btn accent">見どころを抽出<span class="ai-cost free">無料</span></button>
+        <button type="button" id="ai-run-highlights-ai" class="btn ghost">Claude に選んでもらう<span class="ai-cost paid">API</span></button>
       </div>
       <div id="ai-highlights-result" class="ai-result"></div>
     </section>

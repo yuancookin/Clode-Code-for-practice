@@ -19,6 +19,8 @@ const ASSETS = [
   "./js/ai.js",
   "./js/ai-panel.js",
   "./js/ops.js",
+  "./js/local-commands.js",
+  "./js/local-highlights.js",
   "./js/main.js",
   "./icons/favicon.svg",
 ];

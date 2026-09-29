@@ -264,7 +264,10 @@ class Segment(BaseModel):
 class TranscribeRequest(BaseModel):
     media: str = Field(description="uploads/ 内のファイル名")
     language: str | None = Field(default=None, description="ja / en など。省略で自動判定")
-    polish: bool = Field(default=True, description="Claude で字幕として整えるか")
+    polish: bool = Field(
+        default=False,
+        description="Claude で字幕として整えるか（API を使う。既定はローカル整形のみ）",
+    )
     offset: float = Field(default=0.0, description="タイムライン上のクリップ開始位置（秒）")
 
 
@@ -335,7 +338,103 @@ def polish_captions(segments: list[Segment], offset: float) -> list[Caption]:
     ]
 
 
+# ローカル整形で取り除くフィラー（API を使わない字幕づくり用）
+FILLERS = (
+    "えーと", "ええと", "えっと", "えー", "えっ", "あのー", "あのう", "あの、",
+    "そのー", "うーん", "んーと", "まあ", "まぁ", "なんか、", "こう、",
+)
+SENTENCE_BREAKS = "。！？!?"
+MAX_CAPTION_CHARS = 20
+
+
+def clean_caption_text(text: str) -> str:
+    """フィラーと余分な空白を取り除く（内容は変えない）。"""
+    cleaned = text.strip()
+    changed = True
+    while changed:
+        changed = False
+        for filler in FILLERS:
+            if cleaned.startswith(filler):
+                cleaned = cleaned[len(filler) :].lstrip("、 　")
+                changed = True
+    for filler in FILLERS:
+        cleaned = cleaned.replace(f"、{filler}、", "、").replace(f" {filler} ", " ")
+    return " ".join(cleaned.split()).strip("、 　")
+
+
+def split_caption(text: str, limit: int = MAX_CAPTION_CHARS) -> list[str]:
+    """長い文を句読点で区切り、字幕の行にまとめる。
+
+    単語の途中で切れるより多少長い行のほうが読みやすいので、
+    句読点までなら limit を少し超えることを許す。
+    """
+    if len(text) <= limit:
+        return [text] if text else []
+
+    hard_limit = int(limit * 1.3)
+    chunks: list[str] = []
+    current = ""
+    for char in text:
+        current += char
+        if char in SENTENCE_BREAKS or char == "、":
+            chunks.append(current)
+            current = ""
+    if current:
+        chunks.append(current)
+
+    lines: list[str] = []
+    for chunk in chunks:
+        while len(chunk) > hard_limit:  # 句読点が無い長い塊は仕方なく割る
+            lines.append(chunk[:limit])
+            chunk = chunk[limit:]
+        if not chunk:
+            continue
+        if lines and len(lines[-1]) + len(chunk) <= limit:
+            lines[-1] += chunk
+        else:
+            lines.append(chunk)
+    return [line for line in lines if line]
+
+
+def local_captions(segments: list[Segment], offset: float) -> list[Caption]:
+    """Claude を使わずに字幕を作る（フィラー除去・短い断片の結合・長文の分割）。"""
+    merged: list[Segment] = []
+    for segment in segments:
+        text = clean_caption_text(segment.text)
+        if not text:
+            continue
+        previous = merged[-1] if merged else None
+        too_short = (segment.end - segment.start) < 1.0 or len(text) < 6
+        close_enough = previous is not None and (segment.start - previous.end) < 0.6
+        if previous and too_short and close_enough and len(previous.text) + len(text) <= MAX_CAPTION_CHARS * 2:
+            previous.text = f"{previous.text}{text}"
+            previous.end = segment.end
+        else:
+            merged.append(Segment(start=segment.start, end=segment.end, text=text))
+
+    captions: list[Caption] = []
+    for segment in merged:
+        lines = split_caption(segment.text)
+        if not lines:
+            continue
+        span = max(0.4, segment.end - segment.start)
+        total = sum(len(line) for line in lines) or 1
+        cursor = segment.start
+        for line in lines:
+            share = span * (len(line) / total)
+            captions.append(
+                Caption(
+                    text=line,
+                    start=round(cursor + offset, 2),
+                    duration=max(0.5, round(share, 2)),
+                )
+            )
+            cursor += share
+    return captions
+
+
 def fallback_captions(segments: list[Segment], offset: float) -> list[Caption]:
+    """認識結果をそのまま字幕にする（最後の手段）。"""
     return [
         Caption(text=s.text, start=round(s.start + offset, 2), duration=max(0.4, round(s.end - s.start, 2)))
         for s in segments
@@ -370,17 +469,12 @@ async def transcribe(request: TranscribeRequest) -> TranscribeResult:
             captions = polish_captions(segments, request.offset)
             return TranscribeResult(segments=segments, captions=captions, language=language, polished=True)
         except HTTPException:
-            # Claude が使えなくても、認識結果そのままなら字幕にできる
-            return TranscribeResult(
-                segments=segments,
-                captions=fallback_captions(segments, request.offset),
-                language=language,
-                polished=False,
-            )
+            # Claude が使えなくてもローカル整形で字幕にできる
+            pass
 
     return TranscribeResult(
         segments=segments,
-        captions=fallback_captions(segments, request.offset),
+        captions=local_captions(segments, request.offset) or fallback_captions(segments, request.offset),
         language=language,
         polished=False,
     )

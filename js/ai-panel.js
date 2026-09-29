@@ -1,9 +1,11 @@
 /** AI アシスタントのダイアログ。 */
 
 import { formatTime, el } from "./utils.js";
-import { getState, getMedia, undo, addText, createText, select, transaction } from "./store.js";
+import { getState, getSelection, getMedia, undo, addText, createText, select, transaction } from "./store.js";
 import * as ai from "./ai.js";
-import { applyOperations, appendHighlight, mediaTimelineOffset } from "./ops.js";
+import { parseInstruction, SUPPORTED_EXAMPLES } from "./local-commands.js";
+import { pickHighlights } from "./local-highlights.js";
+import { applyOperations, appendHighlight, mediaTimelineOffset, projectSummary } from "./ops.js";
 import * as player from "./player.js";
 import { showToast } from "./toast.js";
 
@@ -14,16 +16,29 @@ const statusLine = $("ai-status");
 const instruction = $("ai-instruction");
 const undoBtn = $("ai-undo");
 
-const EXAMPLES = [
-  "最初の3秒をカットして",
-  "全体をセピアにして",
-  "クリップの切り替えをクロスフェードに",
-  "冒頭に「旅の記録」のテロップを入れて",
-  "BGM の音量を半分に",
-  "縦動画 (9:16) にして",
-];
+const EXAMPLES = SUPPORTED_EXAMPLES;
+const API_KEY_OPTIN = "clipstudio.ai-allow-api";
 
 let busy = false;
+let allowApi = localStorage.getItem(API_KEY_OPTIN) === "on";
+let lastInstruction = "";
+
+function apiAllowed() {
+  return allowApi && ai.getStatus().available;
+}
+
+/** API を使うボタンの有効・無効をまとめて切り替える */
+function syncApiButtons() {
+  const enabled = apiAllowed();
+  ["ai-run-titles", "ai-ask-claude", "ai-run-highlights-ai"].forEach((id) => {
+    const button = $(id);
+    button.disabled = !enabled;
+    button.title = enabled ? "" : "「Claude API を使う」をオンにすると実行できます";
+  });
+  const polish = $("ai-polish");
+  polish.disabled = !enabled;
+  if (!enabled) polish.checked = false;
+}
 
 /* ---------------- 共通 ---------------- */
 
@@ -70,20 +85,23 @@ export async function refresh() {
   statusLine.className = "server-status";
   const status = await ai.refreshStatus();
 
-  if (!status.available) {
-    statusLine.textContent = status.reason || "AI 機能を利用できません（サーバーに ANTHROPIC_API_KEY を設定してください）";
+  const transcription = status.transcription
+    ? "文字起こしはこの端末で実行できます（無料）"
+    : "文字起こしは利用できません（ffmpeg と faster-whisper が必要）";
+
+  if (!allowApi) {
+    statusLine.textContent = `ローカル機能のみ使用中・API 課金なし ・ ${transcription}`;
+    statusLine.className = "server-status";
+  } else if (!status.available) {
+    statusLine.textContent = status.reason || "Claude API を利用できません（サーバーに ANTHROPIC_API_KEY を設定してください）";
     statusLine.className = "server-status error";
   } else {
-    const transcription = status.transcription
-      ? "文字起こしも利用できます"
-      : "文字起こしは利用できません（ffmpeg と faster-whisper が必要）";
     statusLine.textContent = `${status.model} に接続できます ・ ${transcription}`;
     statusLine.className = "server-status online";
   }
-  ["ai-run-edit", "ai-run-titles", "ai-run-highlights"].forEach((id) => {
-    $(id).disabled = !status.available;
-  });
-  $("ai-run-transcribe").disabled = !status.available || !status.transcription;
+
+  $("ai-run-transcribe").disabled = !status.transcription;
+  syncApiButtons();
   fillMediaSelect();
 }
 
@@ -123,24 +141,82 @@ function renderOperations(box, reply, results) {
   box.appendChild(list);
 }
 
-async function runEdit() {
+/** ローカル解釈を試し、無理なときだけ Claude に回す */
+function runEdit() {
   if (busy) return;
   const text = instruction.value.trim();
   if (!text) {
     showToast("指示を入力してください");
     return;
   }
-  const button = $("ai-run-edit");
+  lastInstruction = text;
+  const box = resultBox("ai-edit-result");
+  const parsed = parseInstruction(text, editorContext());
+
+  if (!parsed.understood) {
+    box.appendChild(el("p", "ai-reply", "この指示はローカルでは解釈できませんでした。"));
+    box.appendChild(
+      el(
+        "p",
+        "ai-note",
+        apiAllowed()
+          ? "「Claude に聞く」を押すと API を使って解釈します（1回あたり数円程度）。"
+          : "言い方を変えてみてください（例: 「全体をセピアにして」）。Claude に任せる場合は上の「Claude API を使う」をオンにしてください。"
+      )
+    );
+    $("ai-ask-claude").classList.remove("hidden");
+    return;
+  }
+
+  const applied = applyOperations(parsed.operations);
+  const count = applied.filter((r) => r.applied).length;
+  box.appendChild(
+    el("p", "ai-reply", `ローカルで解釈しました（API 不使用）: ${parsed.matched.map((m) => m.rule).join(" / ")}`)
+  );
+  renderOperations(box, "", applied);
+  if (parsed.partial) {
+    box.appendChild(el("p", "ai-note", `解釈できなかった部分: 「${parsed.leftover}」`));
+    $("ai-ask-claude").classList.toggle("hidden", false);
+  } else {
+    $("ai-ask-claude").classList.add("hidden");
+  }
+  undoBtn.classList.toggle("hidden", count === 0);
+  showToast(count ? `${count} 件の編集を適用しました（無料）` : "適用できる編集はありませんでした");
+}
+
+/** 現在のタイムラインの状態（ローカル解釈に渡す） */
+function editorContext() {
+  const summary = projectSummary();
+  const selection = getState().clips.findIndex((clip) => clip.id === (getSelection()?.id || ""));
+  return {
+    clipCount: summary.clips.length,
+    audioCount: summary.audio.length,
+    textCount: summary.texts.length,
+    selectedIndex: selection >= 0 ? selection + 1 : 0,
+    playhead: player.getTime(),
+    clips: summary.clips.map((clip) => ({
+      sourceStart: clip.source_start,
+      sourceEnd: clip.source_end,
+      speed: clip.speed,
+    })),
+  };
+}
+
+/** ローカルで解釈できなかったときだけ Claude に投げる */
+async function askClaude() {
+  if (busy || !apiAllowed()) return;
+  const button = $("ai-ask-claude");
   const box = resultBox("ai-edit-result");
   setBusy(button, true, "考えています...");
   box.appendChild(el("p", "ai-loading", "Claude が編集内容を考えています..."));
   try {
-    const result = await ai.edit(text);
+    const result = await ai.edit(lastInstruction || instruction.value.trim());
     const applied = applyOperations(result.operations || []);
     box.innerHTML = "";
     renderOperations(box, result.reply || "", applied);
     const count = applied.filter((r) => r.applied).length;
     undoBtn.classList.toggle("hidden", count === 0);
+    button.classList.add("hidden");
     showToast(count ? `${count} 件の編集を適用しました` : "適用できる編集はありませんでした");
   } catch (error) {
     box.innerHTML = "";
@@ -252,6 +328,7 @@ async function runTranscribe() {
     const result = await ai.transcribe(remoteName, {
       language: $("ai-language").value || null,
       offset,
+      polish: $("ai-polish").checked && apiAllowed(),
     });
     ai.setTranscript(mediaId, result.segments || [], result.captions || []);
     box.innerHTML = "";
@@ -264,7 +341,7 @@ async function runTranscribe() {
         "p",
         "ai-reply",
         `${result.captions.length} 個の字幕を作成しました` +
-          (result.polished ? "（Claude で読みやすく整形済み）" : "（認識結果そのまま）")
+          (result.polished ? "（Claude で整形）" : "（ローカル整形・API 不使用）")
       )
     );
     const list = el("ul", "ai-captions");
@@ -312,15 +389,69 @@ function addCaptions() {
 
 /* ---------------- 4. ハイライト ---------------- */
 
-async function runHighlights() {
-  if (busy) return;
+function renderHighlights(box, list, media, source) {
+  box.innerHTML = "";
+  if (!list.length) {
+    errorLine(box, "見どころを抽出できませんでした");
+    return;
+  }
+  box.appendChild(el("p", "ai-note", source));
+  list.forEach((highlight) => {
+    const card = el("div", "ai-highlight");
+    const head = el("div", "ai-highlight-head");
+    head.appendChild(el("strong", null, highlight.title));
+    head.appendChild(
+      el("span", "ai-highlight-time", `${formatTime(highlight.start)} - ${formatTime(highlight.end)}`)
+    );
+    card.appendChild(head);
+    card.appendChild(el("p", "ai-paragraph", highlight.reason));
+    const actions = el("div", "ai-row");
+    const preview = el("button", "btn ghost", "▶ ここから再生");
+    preview.type = "button";
+    preview.addEventListener("click", () => {
+      player.seek(highlight.start);
+      player.play();
+    });
+    actions.appendChild(preview);
+    if (media) {
+      const add = el("button", "btn ghost", "＋ クリップとして追加");
+      add.type = "button";
+      add.addEventListener("click", () => {
+        appendHighlight(media, highlight);
+        showToast(`「${highlight.title}」を追加しました`);
+      });
+      actions.appendChild(add);
+    }
+    card.appendChild(actions);
+    box.appendChild(card);
+  });
+}
+
+/** ローカル抽出（発話量から機械的に選ぶ・無料） */
+function runLocalHighlights() {
   const { segments, mediaId } = ai.getTranscript();
   const box = resultBox("ai-highlights-result");
   if (!segments.length) {
     errorLine(box, "先に「字幕」タブで文字起こしを実行してください");
     return;
   }
-  const button = $("ai-run-highlights");
+  const list = pickHighlights(segments, {
+    count: Number($("ai-highlight-count").value),
+    targetDuration: Number($("ai-highlight-duration").value),
+  });
+  renderHighlights(box, list, getMedia(mediaId), "ローカル抽出（発話量から選定・API 不使用）");
+}
+
+/** Claude に内容を読んで選んでもらう（API 使用） */
+async function runHighlights() {
+  if (busy || !apiAllowed()) return;
+  const { segments, mediaId } = ai.getTranscript();
+  const box = resultBox("ai-highlights-result");
+  if (!segments.length) {
+    errorLine(box, "先に「字幕」タブで文字起こしを実行してください");
+    return;
+  }
+  const button = $("ai-run-highlights-ai");
   setBusy(button, true, "抽出中...");
   box.appendChild(el("p", "ai-loading", "見どころを探しています..."));
   try {
@@ -328,38 +459,7 @@ async function runHighlights() {
       count: Number($("ai-highlight-count").value),
       targetDuration: Number($("ai-highlight-duration").value),
     });
-    box.innerHTML = "";
-    const media = getMedia(mediaId);
-    (result.highlights || []).forEach((highlight) => {
-      const card = el("div", "ai-highlight");
-      const head = el("div", "ai-highlight-head");
-      head.appendChild(el("strong", null, highlight.title));
-      head.appendChild(
-        el("span", "ai-highlight-time", `${formatTime(highlight.start)} - ${formatTime(highlight.end)}`)
-      );
-      card.appendChild(head);
-      card.appendChild(el("p", "ai-paragraph", highlight.reason));
-      const actions = el("div", "ai-row");
-      const preview = el("button", "btn ghost", "▶ ここから再生");
-      preview.type = "button";
-      preview.addEventListener("click", () => {
-        player.seek(highlight.start);
-        player.play();
-      });
-      actions.appendChild(preview);
-      if (media) {
-        const add = el("button", "btn ghost", "＋ クリップとして追加");
-        add.type = "button";
-        add.addEventListener("click", () => {
-          appendHighlight(media, highlight);
-          showToast(`「${highlight.title}」を追加しました`);
-        });
-        actions.appendChild(add);
-      }
-      card.appendChild(actions);
-      box.appendChild(card);
-    });
-    if (!result.highlights?.length) errorLine(box, "見どころを抽出できませんでした");
+    renderHighlights(box, result.highlights || [], getMedia(mediaId), "Claude による抽出");
   } catch (error) {
     box.innerHTML = "";
     errorLine(box, error.message);
@@ -394,11 +494,22 @@ export function init() {
     dialog.showModal();
     refresh();
   });
+  const optin = $("ai-allow-api");
+  optin.checked = allowApi;
+  optin.addEventListener("change", () => {
+    allowApi = optin.checked;
+    localStorage.setItem(API_KEY_OPTIN, allowApi ? "on" : "off");
+    showToast(allowApi ? "Claude API を使う設定にしました（課金されます）" : "API を使わない設定にしました");
+    refresh();
+  });
+
   $("ai-run-edit").addEventListener("click", runEdit);
+  $("ai-ask-claude").addEventListener("click", askClaude);
   $("ai-run-titles").addEventListener("click", runTitles);
   $("ai-run-transcribe").addEventListener("click", runTranscribe);
   $("ai-add-captions").addEventListener("click", addCaptions);
-  $("ai-run-highlights").addEventListener("click", runHighlights);
+  $("ai-run-highlights").addEventListener("click", runLocalHighlights);
+  $("ai-run-highlights-ai").addEventListener("click", runHighlights);
   undoBtn.addEventListener("click", () => {
     undo();
     undoBtn.classList.add("hidden");
