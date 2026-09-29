@@ -31,6 +31,7 @@ import * as inspector from "./inspector.js";
 import * as library from "./library.js";
 import { supportedFormats, exportAndDownload, cancelExport, isExporting, snapshotPNG } from "./export.js";
 import * as api from "./api.js";
+import * as aiPanel from "./ai-panel.js";
 import { showToast } from "./toast.js";
 
 const $ = (id) => document.getElementById(id);
@@ -585,6 +586,8 @@ subscribe(() => {
 /* ------------------------------------------------------------------ */
 /* 起動                                                                */
 /* ------------------------------------------------------------------ */
+
+aiPanel.init();
 
 const restored = loadFromStorage();
 syncStageSize();

@@ -56,6 +56,15 @@ app.add_middleware(
 # 保存したファイルをそのまま配信する（レスポンスの url で参照できる）
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+# AI 機能 (/ai/*)。anthropic が入っていない環境でも他の機能は動くようにする。
+try:
+    from .ai import router as ai_router
+
+    app.include_router(ai_router)
+    AI_ENABLED = True
+except ImportError:  # pragma: no cover - 依存未インストール時
+    AI_ENABLED = False
+
 
 class StoredFile(BaseModel):
     """保存済みファイル 1件分の情報。"""
@@ -170,7 +179,13 @@ async def api_info() -> dict:
         "upload_dir": str(UPLOAD_DIR),
         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
         "allowed_extensions": sorted(ALLOWED_EXTENSIONS),
-        "endpoints": {"upload": "POST /upload", "list": "GET /files", "editor": "GET /"},
+        "ai_enabled": AI_ENABLED,
+        "endpoints": {
+            "upload": "POST /upload",
+            "list": "GET /files",
+            "editor": "GET /",
+            "ai": "GET /ai/status",
+        },
     }
 
 

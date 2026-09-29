@@ -15,6 +15,10 @@ const ASSETS = [
   "./js/library.js",
   "./js/export.js",
   "./js/toast.js",
+  "./js/api.js",
+  "./js/ai.js",
+  "./js/ai-panel.js",
+  "./js/ops.js",
   "./js/main.js",
   "./icons/favicon.svg",
 ];

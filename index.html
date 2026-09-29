@@ -24,6 +24,7 @@
   <div class="header-actions">
     <button type="button" id="btn-import" class="btn primary">＋ メディアを追加</button>
     <button type="button" id="btn-export" class="btn accent">⬇ 書き出し</button>
+    <button type="button" id="btn-ai" class="btn ai-btn" title="AI アシスタント">✨ AI</button>
     <button type="button" id="btn-server" class="icon-btn server-btn" title="サーバー連携" aria-label="サーバー連携">
       <span class="server-dot" id="server-dot"></span>☁
     </button>
@@ -178,6 +179,91 @@
     <div class="dialog-actions">
       <button type="button" id="export-cancel" class="btn ghost">閉じる</button>
       <button type="button" id="export-start" class="btn accent">書き出しを開始</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="ai-dialog" class="dialog wide">
+  <form method="dialog" class="dialog-body">
+    <h2>AI アシスタント</h2>
+    <p id="ai-status" class="server-status">状態を確認しています...</p>
+
+    <nav class="ai-tabs" role="tablist">
+      <button type="button" class="ai-tab active" data-tab="edit" role="tab">🎬 編集する</button>
+      <button type="button" class="ai-tab" data-tab="titles" role="tab">✍ タイトル</button>
+      <button type="button" class="ai-tab" data-tab="captions" role="tab">💬 字幕</button>
+      <button type="button" class="ai-tab" data-tab="highlights" role="tab">⭐ ハイライト</button>
+    </nav>
+
+    <!-- 自然言語で編集 -->
+    <section class="ai-pane" data-pane="edit">
+      <textarea id="ai-instruction" rows="3" placeholder="例: 最初の3秒をカットして、全体をセピアに。冒頭に「旅の記録」というテロップを入れて"></textarea>
+      <div class="chips" id="ai-examples"></div>
+      <div class="ai-actions">
+        <button type="button" id="ai-run-edit" class="btn accent">指示を実行</button>
+        <button type="button" id="ai-undo" class="btn ghost hidden">↩ この編集を取り消す</button>
+      </div>
+      <div id="ai-edit-result" class="ai-result"></div>
+    </section>
+
+    <!-- タイトル・説明文 -->
+    <section class="ai-pane hidden" data-pane="titles">
+      <label class="ai-field">雰囲気の指定（任意）
+        <input type="text" id="ai-tone" placeholder="例: 落ち着いた旅行 vlog 風 / 元気な商品紹介">
+      </label>
+      <div class="ai-actions">
+        <button type="button" id="ai-run-titles" class="btn accent">タイトル・説明文を作る</button>
+      </div>
+      <div id="ai-titles-result" class="ai-result"></div>
+    </section>
+
+    <!-- 字幕 -->
+    <section class="ai-pane hidden" data-pane="captions">
+      <p class="note">サーバーに保存済みの素材を文字起こしして、テロップとして配置します。</p>
+      <div class="server-row">
+        <label class="grow">対象の素材
+          <select id="ai-media"></select>
+        </label>
+        <label>言語
+          <select id="ai-language">
+            <option value="">自動</option>
+            <option value="ja">日本語</option>
+            <option value="en">英語</option>
+          </select>
+        </label>
+      </div>
+      <div class="ai-actions">
+        <button type="button" id="ai-run-transcribe" class="btn accent">文字起こしして字幕を作る</button>
+        <button type="button" id="ai-add-captions" class="btn ghost hidden">タイムラインに追加</button>
+      </div>
+      <div id="ai-captions-result" class="ai-result"></div>
+    </section>
+
+    <!-- ハイライト -->
+    <section class="ai-pane hidden" data-pane="highlights">
+      <p class="note">文字起こしの結果から、短尺動画に向く区間を選びます。先に「字幕」タブで文字起こしを実行してください。</p>
+      <div class="server-row">
+        <label>本数
+          <select id="ai-highlight-count">
+            <option>1</option><option>2</option><option selected>3</option><option>5</option>
+          </select>
+        </label>
+        <label>1本の長さ
+          <select id="ai-highlight-duration">
+            <option value="15">15秒</option>
+            <option value="30" selected>30秒</option>
+            <option value="60">60秒</option>
+          </select>
+        </label>
+      </div>
+      <div class="ai-actions">
+        <button type="button" id="ai-run-highlights" class="btn accent">見どころを抽出</button>
+      </div>
+      <div id="ai-highlights-result" class="ai-result"></div>
+    </section>
+
+    <div class="dialog-actions">
+      <button type="submit" class="btn primary">閉じる</button>
     </div>
   </form>
 </dialog>

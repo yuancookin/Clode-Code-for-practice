@@ -62,6 +62,7 @@ const listeners = new Set();
 const undoStack = [];
 const redoStack = [];
 let pending = null; // バッチ編集中のスナップショット
+let suppressUndo = 0; // transaction 中は個々の commit で履歴を積まない
 
 export function getState() {
   return state;
@@ -133,9 +134,25 @@ function restore(snap) {
 }
 
 function pushUndo() {
+  if (suppressUndo) return;
   undoStack.push(snapshot());
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   redoStack.length = 0;
+}
+
+/**
+ * 複数の編集をまとめて 1 回の取り消しで戻せるようにする。
+ * AI が返した操作列のように、内部で commit を何度も呼ぶ処理に使う。
+ */
+export function transaction(label, fn) {
+  pushUndo();
+  suppressUndo += 1;
+  try {
+    fn();
+  } finally {
+    suppressUndo -= 1;
+  }
+  emit({ label, transaction: true });
 }
 
 export function undo() {
