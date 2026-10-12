@@ -1,89 +1,133 @@
 import numpy as np
 import pandas as pd
+import pytest
 
-import stock_analyzer as sa
-
-
-def series(values):
-    return pd.Series(values, index=pd.bdate_range("2024-01-01", periods=len(values)), dtype=float)
-
-
-def test_crossed_detects_recent_cross_only():
-    above = pd.Series([False] * 10 + [True] * 3)
-    assert sa.crossed(above, 5) == (True, False)
-    assert sa.crossed(above, 2) == (False, False)
+import buy
+import common
+import stock_analyzer
 
 
-def test_bollinger_rebound_from_lower_band():
-    base = 100 + np.sin(np.arange(60))
-    close = series(np.r_[base, 90, 97])  # -2σ を割り込んだ翌日に反発
-    assert sa.analyze_bollinger(close).score == 2
+def frame(close, open_=None):
+    close = np.asarray(close, dtype=float)
+    open_ = close if open_ is None else np.asarray(open_, dtype=float)
+    idx = pd.bdate_range("2024-01-01", periods=len(close))
+    return pd.DataFrame({"Open": open_, "High": np.maximum(open_, close) + 1, "Low": np.minimum(open_, close) - 1,
+                         "Close": close, "Volume": 500_000}, index=idx)
 
 
-def test_bollinger_overheated():
-    close = series(np.r_[100 + np.sin(np.arange(60)), 115])
-    assert sa.analyze_bollinger(close).score == -2
+# --- 呼値・注文価格 ---------------------------------------------------------
+
+@pytest.mark.parametrize("ma, above, below", [(2377, 2378, 2376), (2377.4, 2378, 2377), (2378, 2379, 2377)])
+def test_one_tick_above_and_below_ma(ma, above, below):
+    assert common.price_above(ma, japan=True) == above
+    assert common.price_below(ma, japan=True) == below
 
 
-def test_ma75_uptrend_and_downtrend():
-    assert sa.analyze_ma75(series(np.linspace(100, 200, 120))).score == 1
-    assert sa.analyze_ma75(series(np.linspace(200, 100, 120))).score == -2
+def test_tick_size_bands():
+    assert common.tick_size(2_999, True) == 1
+    assert common.tick_size(4_000, True) == 5
+    assert common.price_above(4_002, True) == 4_005
+    assert common.price_above(10.004, False) == 10.01
 
 
-def test_granville_buy1_on_turn_up():
-    # 下落 → 底這い → 上抜け
-    close = series(np.r_[np.linspace(150, 100, 60), np.full(25, 100.0), [101, 103]])
-    result = sa.analyze_granville(close)
-    assert result.score == 2 and result.reason.startswith("買い①")
+def test_order_expires_on_friday_of_next_trading_week():
+    assert common.order_expiry(pd.Timestamp("2026-10-07")) == pd.Timestamp("2026-10-09")  # 水 → 同じ週の金
+    assert common.order_expiry(pd.Timestamp("2026-10-09")) == pd.Timestamp("2026-10-16")  # 金 → 翌週の金
 
 
-def test_granville_buy2_after_temporary_dip():
-    up = np.linspace(100, 150, 60)
-    close = series(np.r_[up, 140, 152])  # 上昇中に一時的に25日線を割り込み → 回復
-    result = sa.analyze_granville(close)
-    assert result.score == 2 and result.reason.startswith("買い②")
+# --- 底値の確認（3段下げ） ---------------------------------------------------
+
+def test_three_step_decline_is_counted():
+    df = common.demo_prices("DEMO-1回目の波")
+    dec = buy.find_decline(df)
+    assert dec.days >= buy.DECLINE_DAYS and dec.lower_lows >= 3
 
 
-def test_granville_buy4_large_negative_gap():
-    close = series(np.r_[np.linspace(200, 150, 60), 120])
-    result = sa.analyze_granville(close)
-    assert result.score == 1 and result.reason.startswith("買い④")
+def test_swing_lows_ignore_unconfirmed_recent_days():
+    low = np.array([5, 4, 3, 2, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3])
+    assert buy.swing_lows(low, w=3) == [4]
 
 
-def test_macd_not_used_for_buy():
-    assert sa.analyze_macd not in sa.BUY_METHODS
+# --- 1回目の波 ---------------------------------------------------------------
+
+def test_first_wave_order_before_breakout():
+    df = common.demo_prices("DEMO-1回目の波")
+    ma = common.sma(df["Close"], 75)
+    cross = buy.recent_breakout(df["Close"], ma, days=10)
+    a = buy.analyze_buy(df.iloc[:cross], "1234.T")
+    assert a.status == "order" and a.wave == "1回目の波"
+    ma_before = ma.iloc[cross - 1]
+    assert a.order.trigger == common.price_above(ma_before, True) > ma_before
+    assert a.order.stop == common.price_below(ma_before, True) < ma_before
 
 
-def test_verdict_thresholds():
-    assert [sa.verdict(t) for t in (6, 4, 3, 2, 1, -1, -2, -4)] == [
-        "強い買い", "強い買い", "買い", "買い", "様子見", "様子見", "売り", "強い売り",
-    ]
+def test_first_wave_reports_breakout_after_cross():
+    a = buy.analyze_buy(common.demo_prices("DEMO-1回目の波"), "1234.T")
+    assert a.status == "filled" and "75日線を上抜け" in a.summary
 
 
-def test_demo_runs():
-    assert sa.main(["--demo", "--backtest"]) == 0
+def test_steady_downtrend_is_avoided():
+    a = buy.analyze_buy(common.demo_prices("DEMO-下落中"), "1234.T")
+    assert a.status == "avoid" and a.grade == "-"
 
 
-def test_breakout_price_crosses_ma75_next_day():
-    close = series(np.linspace(200, 100, 120))
-    line = sa.breakout_price(close)
-    just_above = series(np.r_[close.values, line + 0.01])
-    just_below = series(np.r_[close.values, line - 0.01])
-    assert just_above.iloc[-1] > sa.sma(just_above, 75).iloc[-1]
-    assert just_below.iloc[-1] < sa.sma(just_below, 75).iloc[-1]
+def test_low_volume_blocks_order():
+    df = common.demo_prices("DEMO-1回目の波")
+    cross = buy.recent_breakout(df["Close"], common.sma(df["Close"], 75), days=10)
+    a = buy.analyze_buy(df.iloc[:cross], "1234.T", min_volume=10_000_000)
+    assert a.status == "watch" and a.grade == "C"
 
 
-def test_ma75_breakout_is_buy_point():
-    close = series(np.r_[np.full(80, 100.0), np.full(10, 98.0)])  # 75日線は横ばい、株価はその下
-    breakout = series(np.r_[close.values, sa.breakout_price(close) + 1])
-    result = sa.analyze_ma75(breakout)
-    assert result.score == 2 and "本日75日線を上抜け" in result.reason
-    assert sa.days_since_cross_up(breakout) == 0
-    assert sa.days_since_cross_up(series(np.r_[breakout.values, 120])) == 1
-    assert sa.days_since_cross_up(close) is None
+# --- 2回目以降の波（トレンド転換線） ---------------------------------------
+
+def test_turn_line_is_highest_body_between_high_and_low():
+    rise = np.linspace(100, 200, 130)
+    # 高値 210 → 下落の途中で実体上端 205 → 安値 190 → 206 で転換線 205 を上抜け
+    close = np.r_[rise, 210, 205, 198, 192, 190, 195, 206]
+    open_ = np.r_[rise, 200, 208, 204, 197, 192, 191, 196]
+    df = frame(close, open_)
+    line = buy.find_turn_line(df, common.sma(df["Close"], 75))
+    assert line.level == 208  # 高値の次の陰線の実体上端（始値 208）
+    assert line.turn_idx is None  # 206 は 208 を超えていない
+
+    df2 = frame(np.r_[close, 209], np.r_[open_, 205])
+    line2 = buy.find_turn_line(df2, common.sma(df2["Close"], 75))
+    assert line2.turn_idx == len(df2) - 1
+    a = buy.analyze_buy(df2, "1234.T")
+    assert a.status == "order" and a.order.trigger == common.price_above(df2["High"].iloc[-1], True)
 
 
-def test_buy_line_text():
-    down = series(np.linspace(200, 100, 120))
-    assert "を超えれば75日線を上抜け" in sa.buy_line_text("7203.T", down)
-    assert "上抜け済み" in sa.buy_line_text("AAPL", series(np.linspace(100, 200, 120)))
+def test_pullback_touching_ma_is_not_second_wave():
+    df = frame(np.r_[np.linspace(100, 200, 100), 200, 150, 140, 160])
+    assert buy.find_turn_line(df, common.sma(df["Close"], 75)) is None
+
+
+# --- 過去検証・CLI ------------------------------------------------------------
+
+def test_backtest_fills_at_or_above_trigger_and_stops_below_ma():
+    df = common.demo_prices("DEMO-1回目の波")
+    trades = buy.backtest_buy(df, "1234.T")
+    assert trades
+    ma = common.sma(df["Close"], 75)
+    for t in trades:
+        assert t.entry > ma.loc[t.entry_date] - 1
+        if t.reason == "ロスカット":
+            assert t.exit < ma.loc[t.entry_date]
+
+
+def test_summarize_separates_open_positions():
+    t = lambda r, reason: buy.Trade(pd.Timestamp("2024-01-01"), 100, pd.Timestamp("2024-02-01"), 100 * (1 + r), reason, "")
+    s = buy.summarize([t(0.1, "20日経過"), t(-0.05, "ロスカット"), t(0.2, buy.OPEN)])
+    assert s["trades"] == 2 and s["open"] == 1 and s["win_rate"] == 0.5 and s["payoff"] == pytest.approx(2)
+
+
+def test_position_size_is_capped_by_capital(capsys):
+    df = common.demo_prices("DEMO-1回目の波")
+    cross = buy.recent_breakout(df["Close"], common.sma(df["Close"], 75), days=10)
+    stock_analyzer.print_buy(buy.analyze_buy(df.iloc[:cross], "1234.T"), risk=10_000, capital=500_000)
+    out = capsys.readouterr().out
+    assert "500株（投資上限" in out and "損切り幅" in out
+
+
+def test_cli_demo_runs():
+    assert stock_analyzer.main(["buy", "--demo", "--backtest", "--risk", "10000", "--capital", "500000"]) == 0
