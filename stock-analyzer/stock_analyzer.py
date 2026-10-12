@@ -121,17 +121,44 @@ def ma_slope(ma: pd.Series, days: int, end: int = -1) -> float:
     return ma.iloc[end] / ma.iloc[end - days] - 1
 
 
-def analyze_ma75(close: pd.Series, n: int = 75, slope_days: int = 10, flat: float = 0.005) -> MethodResult:
+def breakout_price(close: pd.Series, n: int = 75) -> float:
+    """次の営業日の終値がこの価格を超えると、株価が n 日線を上抜ける。
+
+    翌日の n 日線 = (直近 n-1 日の終値合計 + P) / n なので、
+    P > 翌日の n 日線  ⇔  P > 直近 n-1 日の終値平均。
+    """
+    return float(close.iloc[-(n - 1):].mean())
+
+
+def days_since_cross_up(close: pd.Series, n: int = 75) -> int | None:
+    """株価が n 日線を最後に上抜けてから何営業日か。現在 n 日線の下なら None。"""
+    above = (close > sma(close, n)).to_numpy()
+    if not above[-1]:
+        return None
+    below_idx = np.flatnonzero(~above)
+    return int(len(above) - 2 - below_idx[-1]) if len(below_idx) else len(above)
+
+
+def analyze_ma75(close: pd.Series, n: int = 75, slope_days: int = 10, flat: float = 0.005,
+                 lookback: int = 3) -> MethodResult:
     ma = sma(close, n)
     slope = ma_slope(ma, slope_days)
     above = close.iloc[-1] > ma.iloc[-1]
     trend = "上向き" if slope > flat else "下向き" if slope < -flat else "横ばい"
-    pos = "上" if above else "下"
-    reason = f"{n}日線は{trend} ({slope:+.1%}/{slope_days}日)、株価は{n}日線の{pos}"
+    slope_text = f"{n}日線は{trend} ({slope:+.1%}/{slope_days}日)"
+    name = f"{n}日移動平均線"
 
-    score = {("上向き", True): 2, ("横ばい", True): 1, ("上向き", False): 0,
+    since = days_since_cross_up(close, n)
+    if since is not None and since < lookback:
+        # 75日線の上抜けが買いポイント。75日線が下向きのままの上抜けはだましが多いので1段階下げる
+        score = 1 if trend == "下向き" else 2
+        when = "本日" if since == 0 else f"{since}日前に"
+        return MethodResult(name, score, f"{when}{n}日線を上抜け (買いポイント)、{slope_text}")
+
+    pos = "上" if above else "下"
+    score = {("上向き", True): 1, ("横ばい", True): 1, ("上向き", False): 0,
              ("下向き", True): 0, ("横ばい", False): -1, ("下向き", False): -2}[(trend, above)]
-    return MethodResult(f"{n}日移動平均線", score, reason)
+    return MethodResult(name, score, f"{slope_text}、株価は{n}日線の{pos}")
 
 
 def analyze_granville(close: pd.Series, n: int = 25, lookback: int = 3, slope_days: int = 5,
@@ -220,6 +247,18 @@ def backtest(close: pd.Series, hold: int = 20, threshold: int = 2) -> dict | Non
     return {"signals": len(rets), "win_rate": float((rets > 0).mean()), "avg_return": float(rets.mean()), "hold": hold}
 
 
+def buy_line_text(ticker: str, close: pd.Series, n: int = 75) -> str:
+    price, line = close.iloc[-1], breakout_price(close, n)
+    since = days_since_cross_up(close, n)
+    if since is None:
+        # 日本株は終値がこの価格を「超える」必要があるので、円単位で切り上げて表示する
+        target = np.floor(line) + 1 if ticker.endswith(".T") else line
+        return f"買いライン: 次の終値が {target:,.2f} を超えれば{n}日線を上抜け (現在値から {target / price - 1:+.1%})"
+    ma = sma(close, n).iloc[-1]
+    ago = "本日" if since == 0 else f"{since}営業日前"
+    return f"買いライン: {ago}に{n}日線を上抜け済み ({n}日線 {ma:,.2f}、現在値は {price / ma - 1:+.1%} 上)"
+
+
 def report(ticker: str, df: pd.DataFrame, run_backtest: bool) -> int:
     close = df["Close"]
     results, total = analyze(close)
@@ -227,6 +266,7 @@ def report(ticker: str, df: pd.DataFrame, run_backtest: bool) -> int:
     for r in results:
         print(f"  [{r.score:+d}] {r.name}: {r.reason}")
     print(f"  総合スコア {total:+d} / ±6  →  判定: {verdict(total)}")
+    print("  " + buy_line_text(ticker, close))
     if run_backtest:
         bt = backtest(close)
         if bt:
