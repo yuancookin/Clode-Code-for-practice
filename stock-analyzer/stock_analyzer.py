@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """株価分析ツール: Yahoo Finance から株価を取得し、3つのテクニカル分析を組み合わせて買いシグナルを判定する。
 
-分析手法:
-  1. 移動平均線 (トレンド)     : 短期/長期SMAのゴールデンクロス・並び
-  2. RSI (オシレーター)        : 売られすぎからの反発
-  3. MACD (モメンタム)         : MACDとシグナル線のクロス・ヒストグラムの向き
+買い分析の手法:
+  1. ボリンジャーバンド (20日, ±2σ) : -2σ 付近からの反発、+2σ 超えの過熱
+  2. 75日移動平均線 (中期トレンド)   : 75日線の傾きと株価の位置
+  3. グランビルの法則 (25日線)       : 移動平均線と株価の関係による買い①〜④・売りの法則
+
+MACD は買い判定には使わず、売り分析用に残している (analyze_macd)。
 
 各手法が -2〜+2 のスコアを出し、合計 (-6〜+6) で総合判定する。
 ※ 投資判断の参考情報であり、将来の値動きを保証するものではありません。
@@ -62,13 +64,10 @@ def sma(s: pd.Series, n: int) -> pd.Series:
     return s.rolling(n).mean()
 
 
-def rsi(close: pd.Series, n: int = 14) -> pd.Series:
-    """Wilder の平滑化による RSI。"""
-    diff = close.diff()
-    gain = diff.clip(lower=0).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
-    loss = (-diff.clip(upper=0)).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
-    rs = gain / loss.replace(0, np.nan)
-    return (100 - 100 / (1 + rs)).fillna(100)
+def bollinger(close: pd.Series, n: int = 20, k: float = 2.0):
+    mid = sma(close, n)
+    sd = close.rolling(n).std()
+    return mid - k * sd, mid, mid + k * sd, sd
 
 
 def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
@@ -78,7 +77,7 @@ def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
 
 
 # ---------------------------------------------------------------------------
-# 3つの分析手法（各 -2〜+2）
+# 分析手法（各 -2〜+2）
 # ---------------------------------------------------------------------------
 
 
@@ -97,38 +96,74 @@ def crossed(above: pd.Series, lookback: int) -> tuple[bool, bool]:
     return bool(up), bool(down)
 
 
-def analyze_moving_average(close: pd.Series, short: int = 25, long: int = 75, lookback: int = 5) -> MethodResult:
-    s, l = sma(close, short), sma(close, long)
-    above = s > l
-    golden, dead = crossed(above, lookback)
+def analyze_bollinger(close: pd.Series, n: int = 20, lookback: int = 3) -> MethodResult:
+    lower, mid, upper, sd = bollinger(close, n)
     price = close.iloc[-1]
+    sigma = (price - mid.iloc[-1]) / sd.iloc[-1]  # 株価が中心線から何σ離れているか
+    touched_lower = bool((close.iloc[-lookback - 1 : -1] <= lower.iloc[-lookback - 1 : -1]).any())
+    label = f"{sigma:+.1f}σ"
 
-    if golden:
-        return MethodResult("移動平均線", 2, f"直近{lookback}日以内にゴールデンクロス (SMA{short} が SMA{long} を上抜け)")
-    if dead:
-        return MethodResult("移動平均線", -2, f"直近{lookback}日以内にデッドクロス (SMA{short} が SMA{long} を下抜け)")
-    if above.iloc[-1] and price > s.iloc[-1]:
-        return MethodResult("移動平均線", 1, f"上昇トレンド (株価 > SMA{short} > SMA{long})")
-    if not above.iloc[-1] and price < s.iloc[-1]:
-        return MethodResult("移動平均線", -1, f"下降トレンド (株価 < SMA{short} < SMA{long})")
-    return MethodResult("移動平均線", 0, "トレンド不明瞭")
+    if touched_lower and price > lower.iloc[-1] and price > close.iloc[-2]:
+        return MethodResult("ボリンジャーバンド", 2, f"-2σ にタッチ後、バンド内へ反発 ({label})")
+    if sigma <= -2:
+        return MethodResult("ボリンジャーバンド", 1, f"-2σ 割れの売られすぎ ({label})、反発待ち")
+    if sigma <= -1:
+        return MethodResult("ボリンジャーバンド", 1, f"-1σ〜-2σ の安値圏 ({label})")
+    if sigma >= 2:
+        return MethodResult("ボリンジャーバンド", -2, f"+2σ 超えで過熱 ({label})")
+    if sigma >= 1:
+        return MethodResult("ボリンジャーバンド", -1, f"+1σ〜+2σ の高値圏 ({label})")
+    return MethodResult("ボリンジャーバンド", 0, f"バンド中央付近 ({label})")
 
 
-def analyze_rsi(close: pd.Series, n: int = 14) -> MethodResult:
-    r = rsi(close, n)
-    now, prev = r.iloc[-1], r.iloc[-2]
-    if r.iloc[-6:-1].min() < 30 and now > prev:
-        return MethodResult("RSI", 2, f"売られすぎ(30未満)から反発中 (RSI {now:.1f})")
-    if now < 30:
-        return MethodResult("RSI", 1, f"売られすぎ圏 (RSI {now:.1f})、反発待ち")
-    if now > 70:
-        return MethodResult("RSI", -2, f"買われすぎ圏 (RSI {now:.1f})")
-    if now > 60:
-        return MethodResult("RSI", -1, f"やや過熱 (RSI {now:.1f})")
-    return MethodResult("RSI", 0, f"中立 (RSI {now:.1f})")
+def ma_slope(ma: pd.Series, days: int, end: int = -1) -> float:
+    """移動平均線の days 日間の変化率。end で終点をずらせる。"""
+    return ma.iloc[end] / ma.iloc[end - days] - 1
+
+
+def analyze_ma75(close: pd.Series, n: int = 75, slope_days: int = 10, flat: float = 0.005) -> MethodResult:
+    ma = sma(close, n)
+    slope = ma_slope(ma, slope_days)
+    above = close.iloc[-1] > ma.iloc[-1]
+    trend = "上向き" if slope > flat else "下向き" if slope < -flat else "横ばい"
+    pos = "上" if above else "下"
+    reason = f"{n}日線は{trend} ({slope:+.1%}/{slope_days}日)、株価は{n}日線の{pos}"
+
+    score = {("上向き", True): 2, ("横ばい", True): 1, ("上向き", False): 0,
+             ("下向き", True): 0, ("横ばい", False): -1, ("下向き", False): -2}[(trend, above)]
+    return MethodResult(f"{n}日移動平均線", score, reason)
+
+
+def analyze_granville(close: pd.Series, n: int = 25, lookback: int = 3, slope_days: int = 5,
+                      flat: float = 0.002, gap: float = 0.08) -> MethodResult:
+    """グランビルの法則。移動平均線の向きと株価の位置・乖離から売買の8法則を判定する。"""
+    ma = sma(close, n)
+    slope_now = ma_slope(ma, slope_days)
+    slope_prev = ma_slope(ma, slope_days, end=-1 - slope_days)
+    dev = close / ma - 1
+    cross_up, cross_down = crossed(close > ma, lookback)
+    name = f"グランビル({n}日線)"
+
+    if cross_up and slope_prev <= flat and slope_now >= -flat:
+        return MethodResult(name, 2, "買い①: 下落していた移動平均線が横ばい〜上向きに転じ、株価が上抜け")
+    if cross_up and slope_now > flat:
+        return MethodResult(name, 2, "買い②: 上向きの移動平均線を一時割り込んだ後、再び上抜け")
+    if slope_now > flat and (close.iloc[-5:] > ma.iloc[-5:]).all() and dev.iloc[-5:].min() < 0.02 \
+            and close.iloc[-1] > close.iloc[-2]:
+        return MethodResult(name, 1, "買い③: 上向きの移動平均線に近づいたが割り込まず反発")
+    if slope_now < -flat and dev.iloc[-1] < -gap:
+        return MethodResult(name, 1, f"買い④: 下向きの移動平均線から大きく下方乖離 ({dev.iloc[-1]:+.1%})、自律反発狙い")
+    if cross_down and slope_prev >= -flat and slope_now <= flat:
+        return MethodResult(name, -2, "売り①: 上昇していた移動平均線が横ばい〜下向きに転じ、株価が下抜け")
+    if slope_now > flat and dev.iloc[-1] > gap:
+        return MethodResult(name, -1, f"売り④: 上向きの移動平均線から大きく上方乖離 ({dev.iloc[-1]:+.1%})、過熱")
+    if slope_now < -flat and close.iloc[-1] < ma.iloc[-1]:
+        return MethodResult(name, -1, "下向きの移動平均線の下で推移 (売り②③の局面)")
+    return MethodResult(name, 0, f"法則に該当なし (乖離 {dev.iloc[-1]:+.1%})")
 
 
 def analyze_macd(close: pd.Series, lookback: int = 3) -> MethodResult:
+    """売り分析用。買い判定 (BUY_METHODS) には含めない。"""
     line, sig, hist = macd(close)
     above = line > sig
     crossed_up, crossed_down = crossed(above, lookback)
@@ -144,7 +179,8 @@ def analyze_macd(close: pd.Series, lookback: int = 3) -> MethodResult:
     return MethodResult("MACD", 0 if rising else -1, "MACD < シグナル" + ("、下げ止まりの兆し" if rising else "、下落の勢い継続"))
 
 
-METHODS = (analyze_moving_average, analyze_rsi, analyze_macd)
+BUY_METHODS = (analyze_bollinger, analyze_ma75, analyze_granville)
+MIN_DAYS = 90  # 75日線 + 傾き計算に必要な日数
 
 
 # ---------------------------------------------------------------------------
@@ -165,16 +201,16 @@ def verdict(total: int) -> str:
 
 
 def analyze(close: pd.Series) -> tuple[list[MethodResult], int]:
-    if len(close) < 80:
-        raise ValueError("分析には最低80営業日分のデータが必要です（--period を長くしてください）")
-    results = [m(close) for m in METHODS]
+    if len(close) < MIN_DAYS:
+        raise ValueError(f"分析には最低{MIN_DAYS}営業日分のデータが必要です（--period を長くしてください）")
+    results = [m(close) for m in BUY_METHODS]
     return results, sum(r.score for r in results)
 
 
 def backtest(close: pd.Series, hold: int = 20, threshold: int = 2) -> dict | None:
     """過去の各日で同じ判定をし、総合スコアが threshold 以上だった日の hold 日後リターンを集計する。"""
     rets = []
-    for i in range(80, len(close) - hold):
+    for i in range(MIN_DAYS, len(close) - hold):
         _, total = analyze(close.iloc[: i + 1])
         if total >= threshold:
             rets.append(close.iloc[i + hold] / close.iloc[i] - 1)
@@ -204,7 +240,7 @@ def report(ticker: str, df: pd.DataFrame, run_backtest: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="3つのテクニカル分析で株の買いシグナルを判定します")
+    p = argparse.ArgumentParser(description="ボリンジャーバンド・75日移動平均線・グランビルの法則で株の買いシグナルを判定します")
     p.add_argument("tickers", nargs="*", help='銘柄コード (例: 7203.T AAPL)')
     p.add_argument("--period", default="1y", help="取得期間 (例: 6mo, 1y, 2y, 5y) [既定: 1y]")
     p.add_argument("--backtest", action="store_true", help="過去データで買いシグナルの成績を検証する")
