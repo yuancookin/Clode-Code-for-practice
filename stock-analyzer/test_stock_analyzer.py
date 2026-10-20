@@ -131,3 +131,12 @@ def test_position_size_is_capped_by_capital(capsys):
 
 def test_cli_demo_runs():
     assert stock_analyzer.main(["buy", "--demo", "--backtest", "--risk", "10000", "--capital", "500000"]) == 0
+
+
+def test_demo_before_breakout_is_order():
+    assert buy.analyze_buy(common.demo_prices("DEMO-上抜け直前"), "1234.T").status == "order"
+
+
+def test_demo_data_uses_yen_ticks():
+    a = buy.analyze_buy(common.demo_prices("DEMO-上抜け直前"), "DEMO-上抜け直前")
+    assert a.order.trigger == int(a.order.trigger) and a.order.stop == int(a.order.stop)

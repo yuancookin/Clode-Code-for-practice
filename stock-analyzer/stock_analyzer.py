@@ -13,21 +13,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from buy import MIN_VOLUME, STATUS, STATUS_ORDER, BuyAnalysis, Check, analyze_buy, backtest_buy, summarize
-from common import DEMO_SCENARIOS, demo_prices, fetch_fundamentals, fetch_prices, fmt_price, is_japan, unit_shares
+from buy import (
+    MIN_VOLUME, STATUS, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, fundamentals_check, position_size,
+    summarize,
+)
+from common import DEMO_SCENARIOS, demo_prices, fetch_prices, fmt_price, is_japan
 
 DISCLAIMER = "※ 本ツールの判定は投資助言ではありません。最終判断はご自身で行ってください。"
-
-
-def fundamentals_check(ticker: str) -> Check:
-    """ルール集 9: 売買の引き金にはしないフィルター。増収増益なら加点。"""
-    f = fetch_fundamentals(ticker)
-    pct = lambda v: "不明" if v is None else f"{v:+.1%}"
-    num = lambda v: "不明" if v is None else f"{v:.1f}倍"
-    growth = f["revenue_growth"] is not None and f["earnings_growth"] is not None \
-        and f["revenue_growth"] > 0 and f["earnings_growth"] > 0
-    return Check(growth, f"業績: 増収率 {pct(f['revenue_growth'])} / 増益率 {pct(f['earnings_growth'])}"
-                 f" / PER {num(f['per'])} / PBR {num(f['pbr'])}（割高圏かは同業種と比較）", required=False)
 
 
 def print_buy(a: BuyAnalysis, risk: float | None, capital: float | None = None) -> None:
@@ -41,24 +33,17 @@ def print_buy(a: BuyAnalysis, risk: float | None, capital: float | None = None) 
     if not a.order:
         return
     o = a.order
-    per_share = o.trigger - o.stop
-    unit = unit_shares(japan)
+    size = position_size(o, japan, risk, capital)
     print("  逆指値注文:")
     print(f"   買い      : {fmt_price(o.trigger, japan)} 以上になったら {fmt_price(o.trigger, japan)} で買い"
           f"（{o.basis}、有効期限 {o.expires:%Y-%m-%d}(金) まで）")
     print(f"   ロスカット: {fmt_price(o.stop, japan)} 以下で売り（目安＝今日の75日線−1呼値。約定日の75日線で確定させる）")
-    print(f"   リスク    : 1株 {fmt_price(per_share, japan)} → {unit}株で {fmt_price(per_share * unit, japan)}")
-    limits = []
-    if risk:
-        limits.append((int(risk // per_share // unit * unit), f"許容リスク {fmt_price(risk, japan)}"))
-    if capital:
-        limits.append((int(capital // o.trigger // unit * unit), f"投資上限 {fmt_price(capital, japan)}"))
-    if limits:
-        shares, by = min(limits)
-        print(f"   株数の目安: {shares:,}株（{by}で決定、投資額 {fmt_price(shares * o.trigger, japan)}）")
-    if per_share / o.trigger < 0.01:
+    print(f"   リスク    : 1株 {fmt_price(size.per_share, japan)} → {size.unit}株で {fmt_price(size.per_share * size.unit, japan)}")
+    if size.shares is not None:
+        print(f"   株数の目安: {size.shares:,}株（{size.decided_by}で決定、投資額 {fmt_price(size.shares * o.trigger, japan)}）")
+    if size.narrow_stop:
         hint = "" if capital else "。--capital で投資額の上限も決めておく"
-        print(f"   ⚠ 損切り幅が {per_share / o.trigger:.1%} と狭い。窓を開けて下がると損失は想定より大きくなる{hint}")
+        print(f"   ⚠ 損切り幅が {size.per_share / o.trigger:.1%} と狭い。窓を開けて下がると損失は想定より大きくなる{hint}")
     print("   ※ 75日線は毎日動くため、約定するまで注文価格を毎日見直す。「以上」と「以下」を逆にしない")
 
 

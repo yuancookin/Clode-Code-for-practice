@@ -8,6 +8,8 @@ Yahoo Finance から日足を自動取得し、75日移動平均線を軸にし�
 | 利益確定のタイミング判定（MACD・ボリンジャーバンド 25日） | `profit` | 今後追加 |
 | ロスカットのタイミング判定 | `losscut` | 今後追加 |
 
+コマンドのほかに、ブラウザで使える **アプリ（Streamlit）** もあります → [アプリで使う](#アプリで使うstreamlit)
+
 ## 使い方
 
 ```bash
@@ -26,6 +28,58 @@ python stock_analyzer.py buy 7203.T --backtest --period 5y
 # ネット接続なしで動作確認（疑似データ）
 python stock_analyzer.py buy --demo --backtest
 ```
+
+## アプリで使う（Streamlit）
+
+銘柄コード・株価サイトのリンク・株価ファイルを入れると、買いの状況を判定して、チャート付きで表示します。
+
+| 入力方法 | 例 |
+|---|---|
+| 銘柄コード | `7203`（4桁なら自動で `.T` を付ける）、`6758.T`、`AAPL` |
+| 株価サイトのリンク | `https://finance.yahoo.co.jp/quote/7203.T`、`https://finance.yahoo.com/quote/AAPL/`、`https://kabutan.jp/stock/?code=9202`、`https://minkabu.jp/stock/6758` |
+| 株価ファイル | 日足の CSV / Excel。列は `日付,始値,高値,安値,終値,出来高`（英語の `Date,Open,High,Low,Close,Volume` も可）。Shift_JIS の CSV も読める。最低120営業日分 |
+
+表示される内容は次のとおりです。
+- 判定一覧（CSV で保存可）
+- 銘柄ごとのチャート：ローソク足、75日線、逆指値、ロスカット目安、下落前の高値と底、トレンド転換線
+- チェック項目、逆指値注文の内容、株数の目安、過去検証の結果
+
+### 1. 自分のパソコンで動かす
+
+```bash
+# Python 3.10 以上を用意する
+git clone https://github.com/yuancookin/clode-code-for-practice.git
+cd clode-code-for-practice
+git checkout claude/stock-analyzer     # main に取り込んだ後は不要
+cd stock-analyzer
+
+python -m venv .venv
+source .venv/bin/activate              # Windows は .venv\Scripts\activate
+pip install -r requirements.txt
+
+streamlit run app.py
+```
+
+ブラウザで http://localhost:8501 が開きます。まずは「デモデータ」タブで動作を確認してください。
+
+### 2. インターネットに公開する（Streamlit Community Cloud・無料）
+
+1. このブランチを `main` に取り込む（ブランチのまま公開することもできる）
+2. https://share.streamlit.io に GitHub アカウントでログインする
+3. 「Create app」→「Deploy a public app from GitHub」を選ぶ
+4. 次のように入力して「Deploy」を押す
+   - Repository: `yuancookin/clode-code-for-practice`
+   - Branch: `main`（またはブランチ名）
+   - Main file path: `stock-analyzer/app.py`
+5. 数分で `https://〇〇.streamlit.app` の URL が発行される。`app.py` と同じフォルダの `requirements.txt` が自動でインストールされる
+
+公開範囲はアプリの「Settings → Sharing」で設定します。自分や指定したメールアドレスだけに限定することもできます。
+
+### アプリの注意点
+
+- Streamlit Community Cloud は、多くのアプリで同じサーバーを共有しています。そのため、Yahoo Finance から取得制限を受けて株価を取得できないことがあります。その場合は、株価ファイルのアップロードを使うか、時間をおいて試してください。
+- 取得した株価は1時間キャッシュします。
+- 業績の確認と過去検証は時間がかかるので、サイドバーで必要なときだけオンにしてください。
 
 ## 買いの判定（`buy`）
 
@@ -101,6 +155,9 @@ python stock_analyzer.py buy --demo --backtest
 ```bash
 pip install pytest
 python -m pytest -q
+
+# アプリを画面なしで動作確認する場合
+python -c "from streamlit.testing.v1 import AppTest; at = AppTest.from_file('app.py').run(); at.button(key='run_demo').click().run(); assert not at.exception"
 ```
 
 ## 注意点

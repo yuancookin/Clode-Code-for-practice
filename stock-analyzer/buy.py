@@ -15,8 +15,8 @@ import numpy as np
 import pandas as pd
 
 from common import (
-    MA_DAYS, body_bottom, body_top, candle_text, fmt_price, is_japan, ma_slope, order_expiry,
-    price_above, price_below, sma, unit_shares,
+    MA_DAYS, body_bottom, body_top, candle_text, fetch_fundamentals, fmt_price, is_japan, ma_slope,
+    order_expiry, price_above, price_below, sma, unit_shares,
 )
 
 MIN_DAYS = 120          # 75日線 + 傾きの計算 + 下落の確認に最低限必要な日数
@@ -285,6 +285,39 @@ def analyze_buy(df: pd.DataFrame, ticker: str, min_volume: int = MIN_VOLUME) -> 
     if close.iloc[-1] > ma.iloc[-1]:
         return analyze_next_wave(df, ma, ticker, min_volume)
     return analyze_first_wave(df, ma, ticker, min_volume)
+
+
+def fundamentals_check(ticker: str) -> Check:
+    """ルール集 9: 売買の引き金にはしないフィルター。増収増益なら加点。"""
+    f = fetch_fundamentals(ticker)
+    pct = lambda v: "不明" if v is None else f"{v:+.1%}"
+    num = lambda v: "不明" if v is None else f"{v:.1f}倍"
+    growth = f["revenue_growth"] is not None and f["earnings_growth"] is not None \
+        and f["revenue_growth"] > 0 and f["earnings_growth"] > 0
+    return Check(growth, f"業績: 増収率 {pct(f['revenue_growth'])} / 増益率 {pct(f['earnings_growth'])}"
+                 f" / PER {num(f['per'])} / PBR {num(f['pbr'])}（割高圏かは同業種と比較）", required=False)
+
+
+@dataclass
+class PositionSize:
+    per_share: float            # 1株あたりのリスク（買値 − ロスカット価格）
+    unit: int                   # 売買単位
+    shares: int | None          # 株数の目安（risk も capital も無ければ None）
+    decided_by: str             # 株数を決めた条件
+    narrow_stop: bool           # 損切り幅が 1% 未満
+
+
+def position_size(order: Order, japan: bool, risk: float | None = None, capital: float | None = None) -> PositionSize:
+    """許容リスク額と投資額の上限のうち、少ない方の株数を採る。"""
+    per_share = order.trigger - order.stop
+    unit = unit_shares(japan)
+    limits = []
+    if risk:
+        limits.append((int(risk // per_share // unit * unit), f"許容リスク {fmt_price(risk, japan)}"))
+    if capital:
+        limits.append((int(capital // order.trigger // unit * unit), f"投資上限 {fmt_price(capital, japan)}"))
+    shares, by = min(limits) if limits else (None, "")
+    return PositionSize(per_share, unit, shares, by, per_share / order.trigger < 0.01)
 
 
 # ---------------------------------------------------------------------------

@@ -51,7 +51,8 @@ JP_TICKS = (
 
 
 def is_japan(ticker: str) -> bool:
-    return ticker.upper().endswith(".T")
+    # デモデータ（DEMO-…）は日本株を想定した疑似データなので、円の呼値で扱う
+    return ticker.upper().endswith(".T") or ticker.startswith("DEMO-")
 
 
 def tick_size(price: float, japan: bool) -> float:
@@ -142,6 +143,8 @@ def order_expiry(today: pd.Timestamp) -> pd.Timestamp:
 DEMO_SCENARIOS = {
     # 上昇 → 3段下げ → 底打ちして75日線に接近（1回目の波の買い場）
     "DEMO-1回目の波": [(0, 1000), (120, 1400), (150, 1180), (160, 1250), (180, 1020), (190, 1090), (215, 820), (255, 950)],
+    # 同じ形で、75日線を上抜ける直前（買い注文を出す場面）
+    "DEMO-上抜け直前": [(0, 1000), (120, 1400), (150, 1180), (160, 1250), (180, 1020), (190, 1090), (215, 820), (248, 930)],
     # 75日線の上で上昇中 → 75日線に届かない調整 → 反発（2回目以降の波）
     "DEMO-2回目の波": [(0, 900), (200, 1500), (210, 1450), (216, 1510)],
     # 一本調子の下落（対象外）
