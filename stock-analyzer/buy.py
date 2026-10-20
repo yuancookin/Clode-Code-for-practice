@@ -15,8 +15,8 @@ import numpy as np
 import pandas as pd
 
 from common import (
-    MA_DAYS, body_bottom, body_top, candle_text, fetch_fundamentals, fmt_price, is_japan, ma_slope,
-    order_expiry, price_above, price_below, sma, unit_shares,
+    MA_DAYS, Freshness, body_bottom, body_top, candle_text, fetch_fundamentals, fmt_date, fmt_price, is_japan,
+    ma_slope, order_expiry, price_above, price_below, sma, unit_shares,
 )
 
 MIN_DAYS = 120          # 75日線 + 傾きの計算 + 下落の確認に最低限必要な日数
@@ -62,6 +62,25 @@ class BuyAnalysis:
     summary: str
     checks: list[Check] = field(default_factory=list)
     order: Order | None = None
+    freshness: Freshness | None = None     # データの鮮度（CLI / アプリで取得時に付ける）
+
+    @property
+    def is_stale(self) -> bool:
+        return bool(self.freshness and self.freshness.stale)
+
+    @property
+    def status_label(self) -> str:
+        return STATUS[self.status] + ("（要再判定）" if self.is_stale else "")
+
+    @property
+    def stale_order_note(self) -> str | None:
+        """古いデータで出した注文への注意。最新データなら None。"""
+        if not (self.order and self.is_stale):
+            return None
+        note = f"この注文価格は {fmt_date(self.freshness.last)} の75日線で計算したもの。最新データで判定し直してから注文する"
+        if self.order.expires.date() < self.freshness.expected:
+            note += f"（有効期限 {fmt_date(self.order.expires)} もすでに過ぎている）"
+        return note
 
     @property
     def grade(self) -> str:
@@ -122,7 +141,7 @@ def candle_check(df: pd.DataFrame) -> Check:
 
 
 def make_order(trigger: float, ma_now: float, today: pd.Timestamp, japan: bool, basis: str) -> Order:
-    return Order(trigger, order_expiry(today), price_below(ma_now, japan), basis)
+    return Order(trigger, order_expiry(today, japan), price_below(ma_now, japan), basis)
 
 
 # ---------------------------------------------------------------------------

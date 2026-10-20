@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -126,14 +128,120 @@ def candle_text(df: pd.DataFrame) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 取引日・データの鮮度
+# ---------------------------------------------------------------------------
+
+# 取引所のタイムゾーンと大引けの時刻。データの配信が遅れることがあるので、少し余裕を見る
+MARKETS = {True: ("Asia/Tokyo", dt.time(15, 30)), False: ("America/New_York", dt.time(16, 0))}
+PUBLISH_DELAY = dt.timedelta(minutes=30)
+WEEKDAYS_JP = "月火水木金土日"
+
+
+def is_trading_day(d: dt.date, japan: bool) -> bool:
+    """土日・祝日・年末年始（12/31〜1/3）を除いた日。米国株は土日だけ除く（米国の祝日は考慮しない）。"""
+    if d.weekday() >= 5:
+        return False
+    if not japan:
+        return True
+    if (d.month, d.day) in ((12, 31), (1, 1), (1, 2), (1, 3)):
+        return False
+    try:
+        import jpholiday
+    except ImportError:  # 未インストールなら祝日は考慮しない
+        return True
+    return not jpholiday.is_holiday(d)
+
+
+def market_now(japan: bool, now: dt.datetime | None = None) -> dt.datetime:
+    """取引所の現地時刻。now にタイムゾーンが無ければ現地時刻とみなす（テスト用）。"""
+    tz = MARKETS[japan][0]
+    if now is None:
+        return pd.Timestamp.now(tz=tz).to_pydatetime()
+    ts = pd.Timestamp(now)
+    return (ts.tz_localize(tz) if ts.tzinfo is None else ts.tz_convert(tz)).to_pydatetime()
+
+
+def session_closed(d: dt.date, japan: bool, now: dt.datetime | None = None) -> bool:
+    """d の終値が確定して配信されているか。"""
+    t = market_now(japan, now)
+    if d != t.date():
+        return d < t.date()
+    close = dt.datetime.combine(d, MARKETS[japan][1], tzinfo=t.tzinfo) + PUBLISH_DELAY
+    return t >= close
+
+
+def latest_session(japan: bool, now: dt.datetime | None = None) -> dt.date:
+    """終値が確定している直近の取引日。"""
+    d = market_now(japan, now).date()
+    while not (is_trading_day(d, japan) and session_closed(d, japan, now)):
+        d -= dt.timedelta(days=1)
+    return d
+
+
+def trading_days_between(start: dt.date, end: dt.date, japan: bool) -> int:
+    """start の翌日から end までの取引日の数（start が end 以降なら 0）。"""
+    days, d = 0, start + dt.timedelta(days=1)
+    while d <= end:
+        days += is_trading_day(d, japan)
+        d += dt.timedelta(days=1)
+    return days
+
+
+@dataclass
+class Freshness:
+    last: dt.date               # データの最終日
+    expected: dt.date           # 終値が確定している直近の取引日
+    stale: int                  # 何取引日分古いか（0 なら最新）
+    dropped_partial: bool       # 取引時間中の未確定の足を除いたか
+
+    @property
+    def text(self) -> str:
+        note = "（取引時間中のため当日の未確定の足は除外）" if self.dropped_partial else ""
+        if self.stale == 0:
+            return f"データ: {fmt_date(self.last)} の終値まで（最新）{note}"
+        return (f"データは {fmt_date(self.last)} まで。直近の取引日 {fmt_date(self.expected)} から"
+                f" {self.stale}営業日古いため、最新データで判定し直してください{note}")
+
+
+def ensure_closed_bars(df: pd.DataFrame, ticker: str, now: dt.datetime | None = None) -> tuple[pd.DataFrame, Freshness]:
+    """未確定の当日の足を除き（判定は確定足だけで行う）、データがどれだけ新しいかを返す。"""
+    japan = is_japan(ticker)
+    dropped = False
+    if len(df) and not session_closed(df.index[-1].date(), japan, now):
+        df, dropped = df.iloc[:-1], True
+    expected = latest_session(japan, now)
+    last = df.index[-1].date()
+    return df, Freshness(last, expected, trading_days_between(last, expected, japan), dropped)
+
+
+def fmt_date(d) -> str:
+    """2026-10-16(金) の形式。"""
+    d = pd.Timestamp(d)
+    return f"{d:%Y-%m-%d}({WEEKDAYS_JP[d.weekday()]})"
+
+
+# ---------------------------------------------------------------------------
 # 注文の有効期限
 # ---------------------------------------------------------------------------
 
 
-def order_expiry(today: pd.Timestamp) -> pd.Timestamp:
-    """今日の終値を見て出す注文の有効期限 = 翌営業日が属する週の金曜日（執行条件「今週中」）。"""
-    next_day = today + pd.offsets.BDay(1)
-    return (next_day + pd.Timedelta(days=4 - next_day.weekday())).normalize()
+def next_trading_day(d: dt.date, japan: bool) -> dt.date:
+    d += dt.timedelta(days=1)
+    while not is_trading_day(d, japan):
+        d += dt.timedelta(days=1)
+    return d
+
+
+def order_expiry(today: pd.Timestamp, japan: bool = True) -> pd.Timestamp:
+    """今日の終値を見て出す注文の有効期限（執行条件「今週中」）。
+
+    翌取引日が属する週の最後の取引日（通常は金曜日、祝日ならその前の取引日）。
+    """
+    next_day = next_trading_day(pd.Timestamp(today).date(), japan)
+    d = next_day + dt.timedelta(days=4 - next_day.weekday())
+    while not is_trading_day(d, japan):
+        d -= dt.timedelta(days=1)
+    return pd.Timestamp(d)
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +270,8 @@ def demo_prices(name: str, seed: int = 0) -> pd.DataFrame:
     open_ = np.r_[close[0], close[:-1]] * (1 + rng.normal(0, 0.003, days))
     high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.004, days)))
     low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.004, days)))
-    idx = pd.bdate_range(end=pd.Timestamp("2026-10-09"), periods=days)
+    # 最終日を「終値が確定している直近の取引日」にして、デモがいつでも最新データとして扱われるようにする
+    idx = pd.bdate_range(end=pd.Timestamp(latest_session(True)), periods=days)
     return pd.DataFrame(
         {"Open": open_, "High": high, "Low": low, "Close": close, "Volume": rng.integers(300_000, 800_000, days)},
         index=idx,

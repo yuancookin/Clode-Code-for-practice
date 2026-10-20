@@ -14,10 +14,10 @@ import argparse
 import sys
 
 from buy import (
-    MIN_VOLUME, STATUS, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, fundamentals_check, position_size,
+    MIN_VOLUME, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, fundamentals_check, position_size,
     summarize,
 )
-from common import DEMO_SCENARIOS, demo_prices, fetch_prices, fmt_price, is_japan
+from common import DEMO_SCENARIOS, demo_prices, ensure_closed_bars, fetch_prices, fmt_date, fmt_price, is_japan
 
 DISCLAIMER = "※ 本ツールの判定は投資助言ではありません。最終判断はご自身で行ってください。"
 
@@ -25,7 +25,9 @@ DISCLAIMER = "※ 本ツールの判定は投資助言ではありません。�
 def print_buy(a: BuyAnalysis, risk: float | None, capital: float | None = None) -> None:
     japan = is_japan(a.ticker)
     print(f"\n=== {a.ticker}  ({a.date:%Y-%m-%d} 終値 {fmt_price(a.close, japan)}) ===")
-    print(f"  判定: {STATUS[a.status]}【{a.wave}】  評価: {a.grade}")
+    print(f"  判定: {a.status_label}【{a.wave}】  評価: {a.grade}")
+    if a.freshness:
+        print(f"  {'⚠ ' if a.is_stale else ''}{a.freshness.text}")
     print(f"  {a.summary}")
     for c in a.checks:
         mark = ("✓" if c.ok else "✗") if c.required else ("+" if c.ok else "・")
@@ -35,8 +37,10 @@ def print_buy(a: BuyAnalysis, risk: float | None, capital: float | None = None) 
     o = a.order
     size = position_size(o, japan, risk, capital)
     print("  逆指値注文:")
+    if a.stale_order_note:
+        print(f"   ⚠ {a.stale_order_note}")
     print(f"   買い      : {fmt_price(o.trigger, japan)} 以上になったら {fmt_price(o.trigger, japan)} で買い"
-          f"（{o.basis}、有効期限 {o.expires:%Y-%m-%d}(金) まで）")
+          f"（{o.basis}、有効期限 {fmt_date(o.expires)} まで）")
     print(f"   ロスカット: {fmt_price(o.stop, japan)} 以下で売り（目安＝今日の75日線−1呼値。約定日の75日線で確定させる）")
     print(f"   リスク    : 1株 {fmt_price(size.per_share, japan)} → {size.unit}株で {fmt_price(size.per_share * size.unit, japan)}")
     if size.shares is not None:
@@ -71,8 +75,9 @@ def cmd_buy(args) -> int:
     results = []
     for name, load in sources:
         try:
-            df = load()
+            df, freshness = ensure_closed_bars(load(), name)
             a = analyze_buy(df, name, args.min_volume)
+            a.freshness = freshness
             if args.fundamentals and not args.demo:
                 try:
                     a.checks.append(fundamentals_check(name))
@@ -89,7 +94,8 @@ def cmd_buy(args) -> int:
         print("\n=== 買い候補（優先順） ===")
         for a in sorted(results, key=lambda a: (STATUS_ORDER.index(a.status), a.grade)):
             price = f"  逆指値 {fmt_price(a.order.trigger, is_japan(a.ticker))}" if a.order else ""
-            print(f"  {a.ticker:<16} {STATUS[a.status]:<10} 評価 {a.grade}{price}")
+            stale = f"  ⚠ {a.freshness.stale}営業日前のデータ" if a.is_stale else ""
+            print(f"  {a.ticker:<16} {a.status_label:<10} 評価 {a.grade}{price}{stale}")
     print(f"\n{DISCLAIMER}")
     return 0 if results else 1
 

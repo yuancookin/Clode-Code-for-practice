@@ -15,10 +15,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from buy import (
-    MIN_DAYS, MIN_VOLUME, STATUS, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, find_decline,
+    MIN_DAYS, MIN_VOLUME, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, find_decline,
     find_turn_line, fundamentals_check, position_size, summarize,
 )
-from common import DEMO_SCENARIOS, MA_DAYS, demo_prices, fetch_prices, fmt_price, is_japan, sma
+from common import (
+    DEMO_SCENARIOS, MA_DAYS, demo_prices, ensure_closed_bars, fetch_prices, fmt_date, fmt_price, is_japan, sma,
+)
 from inputs import load_price_file, parse_tickers, ticker_from_filename
 
 st.set_page_config(page_title="75日線トレード判定", page_icon="📈", layout="wide")
@@ -36,7 +38,7 @@ class Source:
     error: str | None = None
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def cached_prices(ticker: str, period: str) -> pd.DataFrame:
     return fetch_prices(ticker, period)
 
@@ -63,6 +65,9 @@ with st.sidebar:
     run_backtest = st.checkbox("買いルールを過去データで検証する", value=False,
                                help="銘柄数が多いと時間がかかります")
     hold = st.slider("検証での仮の保有日数", 5, 60, 20, disabled=not run_backtest)
+    if st.button("株価を取り直す", help="取得した株価は15分間保存しています。大引け後すぐなどに最新の終値を取り直します"):
+        st.cache_data.clear()
+        st.toast("保存していた株価を消去しました。もう一度「判定する」を押してください")
     st.divider()
     st.caption("本アプリの判定は投資助言ではありません。最終判断はご自身で行ってください。")
 
@@ -151,7 +156,10 @@ for src in sources:
     if src.df is None:
         continue
     try:
+        # 取引時間中の未確定の足を除き、データの鮮度を確認する（何度実行しても同じ結果になる）
+        src.df, freshness = ensure_closed_bars(src.df, src.name)
         a = analyze_buy(src.df, src.name, int(min_volume))
+        a.freshness = freshness
     except Exception as e:
         src.error = str(e)
         continue
@@ -169,7 +177,15 @@ for src in sources:
 if not results:
     st.stop()
 
-results.sort(key=lambda r: (STATUS_ORDER.index(r[1].status), r[1].grade))
+results.sort(key=lambda r: (r[1].is_stale, STATUS_ORDER.index(r[1].status), r[1].grade))
+
+stale = [a for _, a in results if a.is_stale]
+if stale:
+    st.warning(
+        f"**{len(stale)}銘柄のデータが最新ではありません**（{', '.join(a.ticker for a in stale)}）。"
+        "75日線や注文価格は日々変わるため、最新の終値で判定し直してください。"
+        "株価ファイルの場合は最新のものをダウンロードし直し、銘柄コードの場合はサイドバーの「株価を取り直す」を押してください。"
+    )
 
 st.subheader("判定一覧")
 rows = []
@@ -178,13 +194,14 @@ for _, a in results:
     rows.append({
         "銘柄": a.ticker,
         "日付": a.date.strftime("%Y-%m-%d"),
+        "データ": f"⚠ {a.freshness.stale}営業日前" if a.is_stale else "最新",
         "終値": fmt_price(a.close, japan),
-        "判定": STATUS[a.status],
+        "判定": a.status_label,
         "波": a.wave,
         "評価": a.grade,
         "逆指値（買い）": fmt_price(a.order.trigger, japan) if a.order else "",
         "ロスカット目安": fmt_price(a.order.stop, japan) if a.order else "",
-        "有効期限": a.order.expires.strftime("%m/%d(金)") if a.order else "",
+        "有効期限": fmt_date(a.order.expires)[5:] if a.order else "",
     })
 table = pd.DataFrame(rows)
 st.dataframe(table, hide_index=True, width="stretch")
@@ -238,8 +255,11 @@ def price_chart(df: pd.DataFrame, a: BuyAnalysis, days: int = 250) -> go.Figure:
 st.subheader("銘柄ごとの詳細")
 for src, a in results:
     japan = is_japan(a.ticker)
-    with st.expander(f"{a.ticker}　{STATUS[a.status]}【{a.wave}】　評価 {a.grade}", expanded=a.status == "order"):
-        STATUS_STYLE[a.status](f"**{STATUS[a.status]}** — {a.summary}")
+    with st.expander(f"{a.ticker}　{a.status_label}【{a.wave}】　評価 {a.grade}", expanded=a.status == "order"):
+        if a.freshness:
+            (st.warning if a.is_stale else st.caption)(("⚠ " if a.is_stale else "") + a.freshness.text)
+        # 古いデータの判定は「買い注文を出す」でも緑にせず、注意の色で出す
+        (st.warning if a.is_stale else STATUS_STYLE[a.status])(f"**{a.status_label}** — {a.summary}")
 
         left, right = st.columns([3, 2])
         with left:
@@ -254,10 +274,12 @@ for src, a in results:
                 o = a.order
                 size = position_size(o, japan, risk or None, capital or None)
                 st.markdown("**逆指値注文**")
+                if a.stale_order_note:
+                    st.error(a.stale_order_note)
                 st.markdown(
                     f"- 買い: **{fmt_price(o.trigger, japan)} 以上**になったら {fmt_price(o.trigger, japan)} で買い"
                     f"（{o.basis}）\n"
-                    f"- 有効期限: {o.expires:%Y-%m-%d}(金) まで\n"
+                    f"- 有効期限: {fmt_date(o.expires)} まで\n"
                     f"- ロスカット目安: **{fmt_price(o.stop, japan)} 以下**で売り（約定日の75日線−1呼値で確定させる）\n"
                     f"- リスク: 1株 {fmt_price(size.per_share, japan)}（{size.unit}株で {fmt_price(size.per_share * size.unit, japan)}）"
                 )
