@@ -174,9 +174,11 @@ with tab_new:
         d3, d4 = st.columns(2)
         transfer_after = d3.number_input("移植（採卵の何日後）", 2, 6, p.transfer_after)
         test_from = d4.number_input("判定（移植の何日後から）", 5, 14, p.test_from)
+        check_before = st.number_input("最初の卵胞チェック（採卵の何日前）", 3, 8, p.check_before,
+                                       help="6なら、採卵10/31に対して10/25か26の通院になります")
         include_alt = st.toggle("遅れた場合の予備日も入れる", value=p.include_alt)
     newp = S.Params(first_d1, int(cycle_len), int(n_cycles), int(rest), int(stim_day), int(egg_day),
-                    int(transfer_after), int(test_from), int(test_from) + 2, bool(include_alt))
+                    int(transfer_after), int(test_from), int(test_from) + 2, bool(include_alt), int(check_before))
 
     st.markdown("**周期ごとの日付**（クリニックで採卵日を言われたら、ここを直します）")
     cyc_key = f"cyc_{hash((newp.first_d1, newp.cycle_len, newp.n_cycles, newp.rest_cycles, newp.egg_day))}"

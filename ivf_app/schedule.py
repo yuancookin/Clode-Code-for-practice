@@ -45,6 +45,7 @@ class Params:
     test_from: int = 7  # 移植の何日後から判定
     test_to: int = 9
     include_alt: bool = True  # 遅れた場合の予備日を入れる
+    check_before: int = 6  # 最初の卵胞チェック通院は採卵の何日前か（その翌日との「どちらか」）
 
 
 def params_to_dict(p: Params) -> dict:
@@ -116,15 +117,21 @@ def generate(cycles: pd.DataFrame, p: Params) -> pd.DataFrame:
         D = lambda k: egg + timedelta(days=k)  # 採卵日からの相対日
 
         add(d1, "生理開始", f"生理{n}", n)
+        cb = max(3, p.check_before)
+        v1 = D(-cb)  # 最初の卵胞チェック（v1 か翌日のどちらか）
         stim = d1 + timedelta(days=p.stim_day - 1)
-        if stim < D(-4):
+        if stim < v1:
             add(stim, "受診・通院", "受診・誘発開始", n)
             d = stim + timedelta(days=1)
-            while d < D(-4):
+            while d < v1:
                 add(d, "自宅で薬", "自宅で薬", n)
                 d += timedelta(days=1)
-        add(D(-4), "受診・通院", "通院(どちらか)", n)
-        add(D(-3), "受診・通院", "通院(どちらか)", n)
+        add(v1, "受診・通院", "通院(どちらか)", n)
+        add(v1 + timedelta(days=1), "受診・通院", "通院(どちらか)", n)
+        d = v1 + timedelta(days=2)
+        while d < D(-2):
+            add(d, "自宅で薬", "薬・通院は指示で", n)
+            d += timedelta(days=1)
         add(D(-2), "トリガー", "トリガー夜(目安)", n)
         if p.include_alt:
             add(D(-1), "予備日", "予備通院", n)
