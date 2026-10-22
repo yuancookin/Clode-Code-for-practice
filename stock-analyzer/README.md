@@ -219,6 +219,17 @@ streamlit run app.py
 - 約定後は、保有銘柄の判定と同じ利益確定・ロスカットのルールで売ります。売った日の終値から、また買いを判定します。
 - 取引回数・勝率・平均リターン・損益比・最大ドローダウン・ロスカット率を表示します。手数料とスリッページは含みません。
 
+### 実際の銘柄でまとめて検証する
+
+```bash
+python backtest_report.py                         # 東証プライムの主要30銘柄・5年
+python backtest_report.py 7203.T 6758.T --period 10y --out report.md --csv trades.csv
+```
+
+全体と売った理由ごとに、勝率・平均リターン・損益比・**ロスカット率**・ロスカットまでの日数を集計し、さらに銘柄別の結果も Markdown の表で出します。
+
+GitHub Actions（`.github/workflows/stock-analyzer.yml`）でも、このブランチや main に push したときに実行されます。結果は実行画面の Summary と、成果物（backtest-report）で確認できます。手動で実行する場合は、Actions タブの「Stock analyzer」→「Run workflow」から、銘柄と期間を指定できます。
+
 ## テスト
 
 ```bash
