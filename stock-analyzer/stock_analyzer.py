@@ -29,6 +29,8 @@ def print_buy(a: BuyAnalysis, risk: float | None, capital: float | None = None) 
     if a.freshness:
         print(f"  {'⚠ ' if a.is_stale else ''}{a.freshness.text}")
     print(f"  {a.summary}")
+    if a.elapsed_text:
+        print(f"  {'⚠ ' if a.penalty else ''}経過: {a.elapsed_text}")
     for c in a.checks:
         mark = ("✓" if c.ok else "✗") if c.required else ("+" if c.ok else "・")
         print(f"   {mark} {c.text}")
@@ -92,7 +94,7 @@ def cmd_buy(args) -> int:
 
     if len(results) > 1:
         print("\n=== 買い候補（優先順） ===")
-        for a in sorted(results, key=lambda a: (STATUS_ORDER.index(a.status), a.grade)):
+        for a in sorted(results, key=lambda a: (STATUS_ORDER.index(a.effective_status), a.grade)):
             price = f"  逆指値 {fmt_price(a.order.trigger, is_japan(a.ticker))}" if a.order else ""
             stale = f"  ⚠ {a.freshness.stale}営業日前のデータ" if a.is_stale else ""
             print(f"  {a.ticker:<16} {a.status_label:<10} 評価 {a.grade}{price}{stale}")

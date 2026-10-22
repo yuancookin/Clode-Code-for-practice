@@ -27,9 +27,16 @@ BREAKOUT_DAYS = 5       # この日数以内の上抜けを「上抜け済み」
 MIN_VOLUME = 100_000    # 25日平均出来高の下限（株）
 SWING_WINDOW = 5        # 安値の山谷を判定する前後の日数
 
+# 上抜け（約定）から時間がたつほど、買いの効果は下がる。経過日数と値上がり率で評価を下げる
+ELAPSED_OK_DAYS = 1     # 約定日を0として、この営業日数までは評価を下げない（当日・翌日）
+ELAPSED_LATE_DAYS = 3   # この営業日数以上たったら見送り
+GAIN_OK = 0.03          # 約定価格からの値上がりがこの率までは評価を下げない
+GAIN_LATE = 0.05        # この率を超えて上がっていたら見送り（追いかけ買いしない）
+
 STATUS = {
     "order": "買い注文を出す",
     "filled": "上抜け済み（約定していれば保有中）",
+    "late": "見送り（上抜けから時間が経過）",
     "turn_wait": "トレンド転換待ち",
     "watch": "ウォッチリスト",
     "avoid": "対象外",
@@ -53,6 +60,27 @@ class Order:
 
 
 @dataclass
+class Elapsed:
+    """上抜け（約定）からの経過。"""
+    fill_date: pd.Timestamp     # 約定した（はずの）日
+    fill_price: float           # 約定価格の目安
+    days: int                   # 約定日からデータの最終日までの営業日数（約定日 = 0）
+    gain: float                 # 約定価格からの値上がり率（最終日の終値）
+
+
+def elapsed_penalty(days: int, gain: float) -> int:
+    """0: そのまま / 1: 評価を1段階下げる / 2: 見送り。"""
+    if days >= ELAPSED_LATE_DAYS or gain > GAIN_LATE:
+        return 2
+    if days > ELAPSED_OK_DAYS or gain > GAIN_OK:
+        return 1
+    return 0
+
+
+GRADES = "ABC"
+
+
+@dataclass
 class BuyAnalysis:
     ticker: str
     date: pd.Timestamp
@@ -63,6 +91,31 @@ class BuyAnalysis:
     checks: list[Check] = field(default_factory=list)
     order: Order | None = None
     freshness: Freshness | None = None     # データの鮮度（CLI / アプリで取得時に付ける）
+    elapsed: Elapsed | None = None         # 上抜け済みのときの経過
+
+    @property
+    def elapsed_days(self) -> int | None:
+        """約定日から今日までの営業日数。データが古ければ、その分も足す。"""
+        if self.elapsed is None:
+            return None
+        return self.elapsed.days + (self.freshness.stale if self.freshness else 0)
+
+    @property
+    def penalty(self) -> int:
+        return 0 if self.elapsed is None else elapsed_penalty(self.elapsed_days, self.elapsed.gain)
+
+    @property
+    def effective_status(self) -> str:
+        return "late" if self.status == "filled" and self.penalty == 2 else self.status
+
+    @property
+    def elapsed_text(self) -> str | None:
+        if self.elapsed is None:
+            return None
+        e = self.elapsed
+        result = ("見送り（追いかけ買いしない）", "評価を1段階下げる", "評価はそのまま")[2 - self.penalty]
+        return (f"{fmt_date(e.fill_date)} に約 {fmt_price(e.fill_price, is_japan(self.ticker))} で約定してから"
+                f" {self.elapsed_days}営業日・約定価格から {e.gain:+.1%} → {result}")
 
     @property
     def is_stale(self) -> bool:
@@ -70,7 +123,7 @@ class BuyAnalysis:
 
     @property
     def status_label(self) -> str:
-        return STATUS[self.status] + ("（要再判定）" if self.is_stale else "")
+        return STATUS[self.effective_status] + ("（要再判定）" if self.is_stale else "")
 
     @property
     def stale_order_note(self) -> str | None:
@@ -84,12 +137,16 @@ class BuyAnalysis:
 
     @property
     def grade(self) -> str:
-        """A: 必須条件すべて＋加点2つ以上 / B: 必須条件すべて / C: 必須条件に未達あり。対象外は「-」。"""
+        """A: 必須条件すべて＋加点2つ以上 / B: 必須条件すべて / C: 必須条件に未達あり。対象外は「-」。
+
+        上抜け済みなら、経過日数・値上がり率に応じて下げる（見送りは C）。
+        """
         if self.status == "avoid":
             return "-"
         if not all(c.ok for c in self.checks if c.required):
             return "C"
-        return "A" if sum(c.ok for c in self.checks if not c.required) >= 2 else "B"
+        base = "A" if sum(c.ok for c in self.checks if not c.required) >= 2 else "B"
+        return GRADES[min(GRADES.index(base) + self.penalty, len(GRADES) - 1)]
 
 
 # ---------------------------------------------------------------------------
@@ -266,10 +323,12 @@ def analyze_next_wave(df: pd.DataFrame, ma: pd.Series, ticker: str, min_volume: 
     trigger = price_above(turn_high, japan)
     turn_day = df.index[line.turn_idx]
     checks.insert(2, Check(True, f"{turn_day:%Y-%m-%d} に実体がトレンド転換線 {level_text} を上抜け（転換成立）"))
-    filled = (df["High"].iloc[line.turn_idx + 1 :] >= trigger).any()
+    hits = np.flatnonzero(df["High"].iloc[line.turn_idx + 1 :].to_numpy() >= trigger)
 
-    if filled:
+    if len(hits):
+        fill_idx = line.turn_idx + 1 + int(hits[0])
         a.status, a.summary = "filled", f"転換ローソク足の高値＋1呼値 {fmt_price(trigger, japan)} に到達済み"
+        a.elapsed = make_elapsed(df, fill_idx, trigger)
     elif len(df) - 1 - line.turn_idx < BREAKOUT_DAYS:
         a.status, a.summary = "order", "トレンド転換が成立。転換ローソク足の高値を超えたら買い"
         a.order = make_order(trigger, ma_now, today, japan, f"転換ローソク足の高値 {fmt_price(turn_high, japan)} ＋1呼値")
@@ -283,6 +342,12 @@ def analyze_next_wave(df: pd.DataFrame, ma: pd.Series, ticker: str, min_volume: 
 # ---------------------------------------------------------------------------
 
 
+def make_elapsed(df: pd.DataFrame, fill_idx: int, trigger: float) -> Elapsed:
+    """逆指値 trigger が fill_idx の日に約定したとして、最終日までの経過を出す（寄り付きで超えていれば始値で約定）。"""
+    fill = max(float(df["Open"].iloc[fill_idx]), trigger)
+    return Elapsed(df.index[fill_idx], fill, len(df) - 1 - fill_idx, float(df["Close"].iloc[-1]) / fill - 1)
+
+
 def analyze_buy(df: pd.DataFrame, ticker: str, min_volume: int = MIN_VOLUME) -> BuyAnalysis:
     if len(df) < MIN_DAYS:
         raise ValueError(f"分析には最低{MIN_DAYS}営業日分のデータが必要です（--period を長くしてください）")
@@ -294,12 +359,12 @@ def analyze_buy(df: pd.DataFrame, ticker: str, min_volume: int = MIN_VOLUME) -> 
     if cross is not None:
         a = analyze_first_wave(df.iloc[:cross], ma.iloc[:cross], ticker, min_volume)
         if a.status == "order":  # 上抜けの前日に注文を出せる状態だった
-            fill = max(float(df["Open"].iloc[cross]), a.order.trigger)
+            elapsed = make_elapsed(df, cross, a.order.trigger)
             return BuyAnalysis(
                 ticker, df.index[-1], float(close.iloc[-1]), "filled", "1回目の波",
-                f"{df.index[cross]:%Y-%m-%d} に75日線を上抜け。注文していれば約 {fmt_price(fill, japan)} で約定"
+                f"{df.index[cross]:%Y-%m-%d} に75日線を上抜け。注文していれば約 {fmt_price(elapsed.fill_price, japan)} で約定"
                 f"（現在は75日線から {close.iloc[-1] / ma.iloc[-1] - 1:+.1%}）",
-                a.checks,
+                a.checks, elapsed=elapsed,
             )
     if close.iloc[-1] > ma.iloc[-1]:
         return analyze_next_wave(df, ma, ticker, min_volume)

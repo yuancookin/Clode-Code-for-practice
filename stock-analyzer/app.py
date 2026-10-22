@@ -26,7 +26,7 @@ from inputs import load_price_file, parse_tickers, ticker_from_filename
 st.set_page_config(page_title="75日線トレード判定", page_icon="📈", layout="wide")
 
 STATUS_STYLE = {  # 判定ごとの表示色
-    "order": st.success, "filled": st.info, "turn_wait": st.warning, "watch": st.info, "avoid": st.error,
+    "order": st.success, "filled": st.info, "late": st.warning, "turn_wait": st.warning, "watch": st.info, "avoid": st.error,
 }
 
 
@@ -177,7 +177,7 @@ for src in sources:
 if not results:
     st.stop()
 
-results.sort(key=lambda r: (r[1].is_stale, STATUS_ORDER.index(r[1].status), r[1].grade))
+results.sort(key=lambda r: (r[1].is_stale, STATUS_ORDER.index(r[1].effective_status), r[1].grade))
 
 stale = [a for _, a in results if a.is_stale]
 if stale:
@@ -199,6 +199,7 @@ for _, a in results:
         "判定": a.status_label,
         "波": a.wave,
         "評価": a.grade,
+        "経過": f"{a.elapsed_days}営業日・{a.elapsed.gain:+.1%}" if a.elapsed else "",
         "逆指値（買い）": fmt_price(a.order.trigger, japan) if a.order else "",
         "ロスカット目安": fmt_price(a.order.stop, japan) if a.order else "",
         "有効期限": fmt_date(a.order.expires)[5:] if a.order else "",
@@ -259,7 +260,9 @@ for src, a in results:
         if a.freshness:
             (st.warning if a.is_stale else st.caption)(("⚠ " if a.is_stale else "") + a.freshness.text)
         # 古いデータの判定は「買い注文を出す」でも緑にせず、注意の色で出す
-        (st.warning if a.is_stale else STATUS_STYLE[a.status])(f"**{a.status_label}** — {a.summary}")
+        (st.warning if a.is_stale else STATUS_STYLE[a.effective_status])(f"**{a.status_label}** — {a.summary}")
+        if a.elapsed_text:
+            (st.warning if a.penalty else st.caption)(f"経過: {a.elapsed_text}")
 
         left, right = st.columns([3, 2])
         with left:
