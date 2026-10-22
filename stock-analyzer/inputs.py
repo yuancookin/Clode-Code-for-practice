@@ -119,3 +119,45 @@ def ticker_from_filename(filename: str) -> str:
     stem = PurePath(filename).stem
     m = re.search(r"(?<![0-9A-Za-z])(\d{3}[0-9A-Z])(?![0-9A-Za-z])", stem.upper())
     return normalize_code(m.group(1)) if m else stem
+
+
+# ---------------------------------------------------------------------------
+# 保有銘柄の一覧（CSV / Excel）
+# ---------------------------------------------------------------------------
+
+POSITION_ALIASES = {
+    "ticker": ["ticker", "code", "銘柄", "銘柄コード", "コード"],
+    "entry_date": ["entry_date", "date", "買付日", "約定日", "購入日"],
+    "entry_price": ["entry_price", "price", "買値", "約定単価", "取得単価", "購入単価"],
+    "shares": ["shares", "qty", "株数", "数量", "保有数"],
+}
+
+
+def load_positions(data: bytes, filename: str):
+    """保有銘柄の一覧を読み込む。列は 銘柄・買付日・買値・株数（株数は省略可）。"""
+    from position import Position
+
+    df = _read_table(data, filename)
+    renamed = {}
+    for col in df.columns:
+        key = str(col).strip().lower()
+        for std, aliases in POSITION_ALIASES.items():
+            if key in aliases and std not in renamed.values():
+                renamed[col] = std
+                break
+    df = df.rename(columns=renamed)
+    missing = [c for c in ("ticker", "entry_date", "entry_price") if c not in df.columns]
+    if missing:
+        names = {"ticker": "銘柄", "entry_date": "買付日", "entry_price": "買値"}
+        raise ValueError(f"必要な列が見つかりません: {', '.join(names[c] for c in missing)}")
+
+    positions = []
+    for _, row in df.iterrows():
+        ticker = parse_ticker(str(row["ticker"]))
+        if ticker is None:
+            raise ValueError(f"銘柄を読み取れません: {row['ticker']}")
+        price = float(str(row["entry_price"]).replace(",", ""))
+        shares = row.get("shares")
+        shares = None if shares is None or pd.isna(shares) else int(float(str(shares).replace(",", "")))
+        positions.append(Position(ticker, pd.Timestamp(row["entry_date"]), price, shares))
+    return positions

@@ -426,41 +426,35 @@ class Trade:
         return self.exit / self.entry - 1
 
 
-def backtest_buy(df: pd.DataFrame, ticker: str, hold: int = 20, min_volume: int = MIN_VOLUME) -> list[Trade]:
-    """買いルールを過去の各日に当てはめて売買を再現する。
+def backtest_buy(df: pd.DataFrame, ticker: str, min_volume: int = MIN_VOLUME) -> list[Trade]:
+    """買いルールと売りルール（利益確定・ロスカット）を過去の各日に当てはめて売買を再現する。
 
     - その日の終値で「買い注文を出す」になったら、翌営業日に逆指値を置く（約定するまで毎日価格を見直す）
     - 高値が逆指値に届いたら約定（寄り付きで超えていたら始値で約定）
-    - 出口は仮のもの: 約定日の75日線−1呼値を安値が割ったらロスカット、hold 日たったら終値で手仕舞い
-      （利益確定のルールを作ったら置き換える）
+    - 約定後は position.scan_exit で最初に出た売りのシグナルで手仕舞う。売った日の終値から、また買いを判定する
     """
-    japan = is_japan(ticker)
-    o, h, l, c = (df[k].to_numpy() for k in ("Open", "High", "Low", "Close"))
-    ma = sma(df["Close"], MA_DAYS).to_numpy()
-    trades: list[Trade] = []
-    pending = position = None   # pending: 前日の判定で置いた逆指値 (価格, 波)
+    from position import scan_exit  # position は buy に依存しないが、循環を避けるためここで読み込む
 
-    for i in range(MIN_DAYS, len(df)):
-        day = df.index[i]
-        if position:
-            entry_i, entry, stop, wave = position
-            if l[i] <= stop:
-                trades.append(Trade(df.index[entry_i], entry, day, min(o[i], stop), "ロスカット", wave))
-                position = None
-            elif i - entry_i >= hold:
-                trades.append(Trade(df.index[entry_i], entry, day, c[i], f"{hold}日経過", wave))
-                position = None
-        elif pending and h[i] >= pending[0]:
-            # 約定日の75日線−1呼値がロスカット。判定は翌日から
-            position = (i, max(o[i], pending[0]), price_below(ma[i], japan), pending[1])
+    japan = is_japan(ticker)
+    o, h = df["Open"].to_numpy(), df["High"].to_numpy()
+    trades: list[Trade] = []
+    pending = None   # 前日の判定で置いた逆指値 (価格, 波)
+    i = MIN_DAYS
+    while i < len(df):
+        if pending and h[i] >= pending[0]:
+            entry, wave = max(o[i], pending[0]), pending[1]
+            ev = scan_exit(df, i, entry, japan).event
+            if ev is None or ev.exec_idx is None:
+                trades.append(Trade(df.index[i], entry, df.index[-1], float(df["Close"].iloc[-1]), OPEN, wave))
+                break
+            reason = "ロスカット" if ev.kind == "losscut" else f"利益確定（{ev.reason}）"
+            trades.append(Trade(df.index[i], entry, df.index[ev.exec_idx], ev.price, reason, wave))
+            i = ev.exec_idx
         pending = None
-        if not position:
-            a = analyze_buy(df.iloc[: i + 1], ticker, min_volume)
-            if a.status == "order":
-                pending = (a.order.trigger, a.wave)
-    if position:
-        entry_i, entry, _, wave = position
-        trades.append(Trade(df.index[entry_i], entry, df.index[-1], c[-1], OPEN, wave))
+        a = analyze_buy(df.iloc[: i + 1], ticker, min_volume)
+        if a.status == "order":
+            pending = (a.order.trigger, a.wave)
+        i += 1
     return trades
 
 

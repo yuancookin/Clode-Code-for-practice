@@ -95,6 +95,19 @@ def sma(s: pd.Series, n: int) -> pd.Series:
     return s.rolling(n).mean()
 
 
+def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    """MACD = 12EMA − 26EMA、シグナル = MACD の 9EMA、ヒストグラム（乖離）= MACD − シグナル。"""
+    line = close.ewm(span=fast, adjust=False).mean() - close.ewm(span=slow, adjust=False).mean()
+    sig = line.ewm(span=signal, adjust=False).mean()
+    return line, sig, line - sig
+
+
+def bollinger(close: pd.Series, n: int = 25) -> dict[str, pd.Series]:
+    """ボリンジャーバンド（25日）。中心線と ±1σ・±2σ。"""
+    mid, sd = sma(close, n), close.rolling(n).std()
+    return {"mid": mid, "+1σ": mid + sd, "+2σ": mid + 2 * sd, "-1σ": mid - sd, "-2σ": mid - 2 * sd}
+
+
 def ma_slope(ma: pd.Series, days: int = 10) -> float:
     """移動平均線の days 日間の変化率。"""
     return float(ma.iloc[-1] / ma.iloc[-1 - days] - 1)
@@ -259,17 +272,32 @@ DEMO_SCENARIOS = {
     "DEMO-下落中": [(0, 1500), (255, 900)],
 }
 
+# 保有銘柄の判定用: 名前 → (折れ線の節, 買付日)
+DEMO_POSITION_SCENARIOS = {
+    # 2回目の波で買い、上昇トレンドが続いている
+    "DEMO-保有中": ([(0, 900), (200, 1300), (212, 1250), (240, 1400)], 236),
+    # 2回目の波で買い、上昇した後に勢いが鈍って +1σ を割る
+    "DEMO-利益確定": ([(0, 900), (200, 1300), (212, 1250), (235, 1420), (242, 1390)], 216),
+    # 底から75日線を上抜けて買ったが、すぐに75日線を割る
+    "DEMO-ロスカット": ([(0, 1000), (120, 1400), (150, 1180), (180, 1020), (215, 820), (250, 935), (254, 945), (262, 880)], 245),
+}
+
+
 
 def demo_prices(name: str, seed: int = 0) -> pd.DataFrame:
-    """折れ線の節 (日, 価格) から、少しノイズを乗せた疑似 OHLCV を作る。"""
-    knots = DEMO_SCENARIOS[name]
+    """折れ線の節 (日, 価格) から、少しノイズを乗せた疑似 OHLCV を作る。
+
+    保有銘柄用のデモは、ロスカット（約定日の75日線−1円）がノイズだけで発動しないよう値動きを小さくする。
+    """
+    knots = DEMO_SCENARIOS[name] if name in DEMO_SCENARIOS else DEMO_POSITION_SCENARIOS[name][0]
+    noise = 0.001 if name in DEMO_POSITION_SCENARIOS else 0.004
     days = knots[-1][0] + 1
     rng = np.random.default_rng(seed)
     x, y = zip(*knots)
-    close = np.interp(np.arange(days), x, y) * (1 + rng.normal(0, 0.004, days))
-    open_ = np.r_[close[0], close[:-1]] * (1 + rng.normal(0, 0.003, days))
-    high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.004, days)))
-    low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.004, days)))
+    close = np.interp(np.arange(days), x, y) * (1 + rng.normal(0, noise, days))
+    open_ = np.r_[close[0], close[:-1]] * (1 + rng.normal(0, noise * 0.75, days))
+    high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, noise, days)))
+    low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, noise, days)))
     # 最終日を「終値が確定している直近の取引日」にして、デモがいつでも最新データとして扱われるようにする
     idx = pd.bdate_range(end=pd.Timestamp(latest_session(True)), periods=days)
     return pd.DataFrame(
