@@ -15,7 +15,7 @@ import streamlit as st
 from app_common import cached_fundamentals, cached_prices, sidebar_footer
 from buy import (
     MIN_DAYS, MIN_VOLUME, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, find_decline, find_turn_line,
-    position_size, summarize,
+    position_size, size_text, summarize,
 )
 from common import DEMO_SCENARIOS, MA_DAYS, demo_prices, ensure_closed_bars, fmt_date, fmt_price, is_japan, sma
 from inputs import load_price_file, parse_tickers, ticker_from_filename
@@ -266,9 +266,11 @@ for src, a in results:
                     f"- ロスカット目安: **{fmt_price(o.stop, japan)} 以下**で売り（約定日の75日線−1呼値で確定させる）\n"
                     f"- リスク: 1株 {fmt_price(size.per_share, japan)}（{size.unit}株で {fmt_price(size.per_share * size.unit, japan)}）"
                 )
-                if size.shares is not None:
+                if size.shares:
                     st.metric("株数の目安", f"{size.shares:,}株", help=f"{size.decided_by}で決定")
                     st.caption(f"投資額 {fmt_price(size.shares * o.trigger, japan)}")
+                elif size.shares == 0:
+                    st.warning(f"株数の目安: {size_text(size, o.trigger, japan)}")
                 if size.narrow_stop:
                     st.warning(f"損切り幅が {size.per_share / o.trigger:.1%} と狭いです。窓を開けて下がると、損失は想定より大きくなります。")
                 st.caption("75日線は毎日動くため、約定するまで注文価格を毎日見直してください。「以上」と「以下」を逆にしないこと。")

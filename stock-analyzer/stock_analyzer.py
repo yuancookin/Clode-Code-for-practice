@@ -14,7 +14,7 @@ import argparse
 import sys
 
 from buy import (
-    MIN_VOLUME, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, fundamentals_check, position_size,
+    MIN_VOLUME, STATUS_ORDER, BuyAnalysis, analyze_buy, backtest_buy, fundamentals_check, position_size, size_text,
     summarize,
 )
 import pandas as pd
@@ -50,7 +50,7 @@ def print_buy(a: BuyAnalysis, risk: float | None, capital: float | None = None) 
     print(f"   ロスカット: {fmt_price(o.stop, japan)} 以下で売り（目安＝今日の75日線−1呼値。約定日の75日線で確定させる）")
     print(f"   リスク    : 1株 {fmt_price(size.per_share, japan)} → {size.unit}株で {fmt_price(size.per_share * size.unit, japan)}")
     if size.shares is not None:
-        print(f"   株数の目安: {size.shares:,}株（{size.decided_by}で決定、投資額 {fmt_price(size.shares * o.trigger, japan)}）")
+        print(f"   株数の目安: {size_text(size, o.trigger, japan)}")
     if size.narrow_stop:
         hint = "" if capital else "。--capital で投資額の上限も決めておく"
         print(f"   ⚠ 損切り幅が {size.per_share / o.trigger:.1%} と狭い。窓を開けて下がると損失は想定より大きくなる{hint}")

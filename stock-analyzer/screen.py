@@ -13,7 +13,7 @@ import argparse
 import sys
 import time
 
-from buy import STATUS_ORDER, BuyAnalysis, analyze_buy, position_size
+from buy import STATUS_ORDER, BuyAnalysis, analyze_buy, position_size, size_text
 from common import ensure_closed_bars, fetch_prices, fmt_date, fmt_price, is_japan
 
 # 東証プライムの主要銘柄（backtest_report の30銘柄＋30銘柄）
@@ -45,7 +45,7 @@ def detail(a: BuyAnalysis, risk: float, capital: float) -> list[str]:
             "",
             f"- **逆指値（買い）: {fmt_price(o.trigger, japan)} 以上**で買い（{o.basis}）、有効期限 {fmt_date(o.expires)}",
             f"- **ロスカット目安: {fmt_price(o.stop, japan)} 以下**（約定日の75日線−1呼値で確定）",
-            f"- 株数の目安: {size.shares:,}株（{size.decided_by}）" if size.shares is not None else "",
+            f"- 株数の目安: {size_text(size, o.trigger, japan)}" if size.shares is not None else "",
         ]
     return [line for line in lines if line != ""] + [""]
 

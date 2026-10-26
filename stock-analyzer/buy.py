@@ -404,6 +404,15 @@ def position_size(order: Order, japan: bool, risk: float | None = None, capital:
     return PositionSize(per_share, unit, shares, by, per_share / order.trigger < 0.01)
 
 
+def size_text(size: PositionSize, trigger: float, japan: bool) -> str | None:
+    """株数の目安の説明。1単元も買えないときはその理由を書く。"""
+    if size.shares is None:
+        return None
+    if size.shares == 0:
+        return (f"{size.decided_by}では1単元（{size.unit}株・{fmt_price(size.unit * trigger, japan)}）も買えない")
+    return f"{size.shares:,}株（{size.decided_by}で決定、投資額 {fmt_price(size.shares * trigger, japan)}）"
+
+
 # ---------------------------------------------------------------------------
 # 買いルールの検証（バックテスト）
 # ---------------------------------------------------------------------------

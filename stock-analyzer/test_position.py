@@ -95,3 +95,10 @@ def test_cli_position_demo(capsys):
     assert stock_analyzer.main(["position", "--demo"]) == 0
     out = capsys.readouterr().out
     assert "【ロスカット】" in out and "【利益確定】" in out and "保有銘柄のまとめ" in out
+
+
+def test_size_text_when_one_unit_exceeds_capital():
+    order = buy.Order(79_100, pd.Timestamp("2026-10-30"), 79_000, "")
+    size = buy.position_size(order, True, risk=10_000, capital=500_000)
+    assert size.shares == 0
+    assert "1単元（100株・7,910,000円）も買えない" in buy.size_text(size, order.trigger, True)
