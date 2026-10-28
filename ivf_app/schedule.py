@@ -332,7 +332,7 @@ def _ics_escape(s: str) -> str:
 
 
 def to_ics(df: pd.DataFrame, kinds) -> str:
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ivf-schedule//JP", "CALSCALE:GREGORIAN",
            "X-WR-CALNAME:体外受精スケジュール"]
     for a, b, kind, lab, cyc in _runs(df, kinds):

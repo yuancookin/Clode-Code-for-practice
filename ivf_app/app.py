@@ -16,6 +16,7 @@ USE_DB = store.configured()
 st.markdown(
     """<style>
     .block-container{padding-top:1.6rem;padding-bottom:3rem}
+    @media (max-width:640px){h1{font-size:1.7rem !important}}
     div[data-testid="stTabs"] button p{font-size:15px}
     .ivf-next{background:#F4F8FD;border:1px solid #D6E5F6;border-radius:10px;padding:10px 14px;margin:6px 0 4px;font-size:14px;line-height:1.75;color:#1f2b3a}
     .ivf-next b{color:#378ADD}
@@ -32,7 +33,7 @@ if USE_DB and not store.user():
     with st.form("login"):
         email = st.text_input("メールアドレス", autocomplete="email")
         pw = st.text_input("パスワード", type="password", autocomplete="current-password")
-        ok = st.form_submit_button("ログイン", type="primary", use_container_width=True)
+        ok = st.form_submit_button("ログイン", type="primary", width="stretch")
     if ok:
         try:
             store.sign_in(email.strip(), pw)
@@ -92,7 +93,7 @@ with tab_edit:
         key=f"editor_{ss.ver}",
         num_rows="dynamic",
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "日付": st.column_config.DateColumn("日付", format="YYYY/MM/DD", required=True),
             "種類": st.column_config.SelectboxColumn("種類", options=S.KIND_NAMES, required=True),
@@ -127,11 +128,11 @@ with tab_edit:
         else:
             st.caption("この日の予定：なし")
         b1, b2, b3 = st.columns(3)
-        if b1.button("追加", use_container_width=True, type="primary"):
+        if b1.button("追加", width="stretch", type="primary"):
             set_base(S.set_day(ev, q_date, q_kind, q_label.strip(), int(q_cycle), "add"), f"{S.wd(q_date)} に追加しました")
-        if b2.button("置き換え", use_container_width=True, help="この日の予定を消して、入力した内容だけにします"):
+        if b2.button("置き換え", width="stretch", help="この日の予定を消して、入力した内容だけにします"):
             set_base(S.set_day(ev, q_date, q_kind, q_label.strip(), int(q_cycle), "replace"), f"{S.wd(q_date)} を置き換えました")
-        if b3.button("この日を消す", use_container_width=True):
+        if b3.button("この日を消す", width="stretch"):
             set_base(S.set_day(ev, q_date, q_kind, "", 0, "delete"), f"{S.wd(q_date)} の予定を消しました")
 
         with st.expander("予定をまとめて前後にずらす（例：採卵が1日遅れた）"):
@@ -186,7 +187,7 @@ with tab_new:
         S.default_cycles(newp),
         key=cyc_key,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         disabled=["周期"],
         column_config={
             "生理開始日": st.column_config.DateColumn("生理開始日", format="YYYY/MM/DD"),
@@ -216,7 +217,7 @@ with tab_out:
         data=S.to_ics(ev, kinds).encode("utf-8"),
         file_name="ivf_schedule.ics",
         mime="text/calendar",
-        use_container_width=True,
+        width="stretch",
         type="primary",
     )
     st.caption("Safariでダウンロードすると「カレンダーに追加」が出ます。終日の予定として入ります。")
@@ -231,7 +232,7 @@ with tab_out:
     else:
         st.caption("お試しモードでは閉じると編集内容が消えます。続きから使うときは、CSVを保存して読み込んでください。")
     st.download_button("予定をCSVで保存", data=S.to_csv(ev), file_name="ivf_schedule.csv", mime="text/csv",
-                       use_container_width=True)
+                       width="stretch")
     up = st.file_uploader("保存したCSVを読み込む", type=["csv"])
     if up is not None and st.button("この内容に置き換える"):
         try:
