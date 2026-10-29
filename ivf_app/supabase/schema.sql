@@ -20,6 +20,11 @@ create table if not exists public.ivf_settings (
   updated_at timestamptz not null default now()
 );
 
+-- ログインした人だけがテーブルを使えるようにする
+-- （新しいテーブルを自動で公開しない設定のプロジェクトでも動くように、明示的に付与する）
+revoke all on public.ivf_events, public.ivf_settings from anon;
+grant select, insert, update, delete on public.ivf_events, public.ivf_settings to authenticated;
+
 -- 本人の行だけ読み書きできるようにする（行レベルセキュリティ）
 alter table public.ivf_events   enable row level security;
 alter table public.ivf_settings enable row level security;
