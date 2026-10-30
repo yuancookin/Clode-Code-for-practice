@@ -199,6 +199,45 @@ def shift(df: pd.DataFrame, start: date, days: int, cycle: int | None) -> pd.Dat
     return normalize(df)
 
 
+def cycle_d1(df: pd.DataFrame, n: int) -> date | None:
+    """n周期目の生理開始日（なければ None）。"""
+    s = df[(df["周期"] == n) & (df["種類"] == "生理開始")]["日付"]
+    return min(s) if len(s) else None
+
+
+def cycle_egg(df: pd.DataFrame, n: int) -> date | None:
+    s = df[(df["周期"] == n) & (df["種類"] == "採卵")]["日付"]
+    return min(s) if len(s) else None
+
+
+def regen_cycle(df: pd.DataFrame, n: int, d1: date, egg: date | None, p: Params,
+                shift_later: bool = False) -> pd.DataFrame:
+    """n周期目だけを作り直す。ほかの周期と、自分で足した「メモ」はそのまま残す。
+    shift_later=True なら、生理開始日が動いた日数だけ後ろの周期もずらす。"""
+    old_d1 = cycle_d1(df, n)
+    keep = df[~((df["周期"] == n) & (df["種類"] != "メモ"))].copy()
+    if shift_later and old_d1 is not None and d1 != old_d1:
+        later = keep["周期"] > n
+        keep.loc[later, "日付"] = keep.loc[later, "日付"].map(lambda x: x + (d1 - old_d1))
+    new = generate(pd.DataFrame([{"周期": n, "生理開始日": d1, "採卵日": egg}]), p)
+    return normalize(pd.concat([keep, new], ignore_index=True))
+
+
+def put_day(df: pd.DataFrame, d: date, items: list[dict]) -> pd.DataFrame:
+    """d の日の予定を items（種類・メモ・周期）でまるごと置き換える。"""
+    rest = df[df["日付"] != d]
+    new = pd.DataFrame([{"日付": d, **it} for it in items], columns=COLS)
+    return normalize(pd.concat([rest, new], ignore_index=True))
+
+
+def cycle_near(df: pd.DataFrame, d: date) -> int:
+    """d にいちばん近い予定の周期（新しく足す予定の周期の初期値）。"""
+    if len(df) == 0:
+        return 1
+    i = df["日付"].map(lambda x: abs((x - d).days)).idxmin()
+    return int(df.loc[i, "周期"])
+
+
 def set_day(df: pd.DataFrame, d: date, kind: str, label: str, cycle: int, mode: str) -> pd.DataFrame:
     """mode: add=この日に追加 / replace=この日の予定を置き換え / delete=この日の予定を消す"""
     df = df.copy()
