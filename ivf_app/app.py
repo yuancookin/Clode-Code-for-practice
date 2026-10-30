@@ -50,6 +50,8 @@ st.markdown(
     header[data-testid="stHeader"]{display:none}
     .stApp{background:linear-gradient(180deg,#B9CDDC 0%,#C9D8E4 38%,#DCE6EE 100%) fixed}
     .block-container{padding-top:1.4rem;padding-bottom:4rem;max-width:680px}
+    /* スマホでは下に余白を多めにとり、最後のボタンが Safari のバーやバッジに隠れないようにする */
+    @media (max-width:640px){.block-container{padding-top:1rem;padding-bottom:calc(7rem + env(safe-area-inset-bottom))}}
     .ivf-bar .today b,.ivf-hero .big,.ivf-c .n{font-variant-numeric:lining-nums}
     .serif{font-family:'Cormorant Garamond',serif}
     /* 見出し：雑誌の表紙のように */
