@@ -147,21 +147,72 @@ if USE_DB and not store.user():
     if ss.pop("clear_cookie", False):
         write_cookie("", 0)
     bar(compact=False)
-    st.caption("予定を見るには、ログインしてください。")
-    with st.form("login"):
-        email = st.text_input("メールアドレス", autocomplete="email")
-        pw = st.text_input("パスワード", type="password", autocomplete="current-password")
-        keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True,
-                           help="この端末では、次から開いたときにログインしなくてすみます。共用の端末ではオフにしてください。")
-        ok = st.form_submit_button("ログイン", type="primary", width="stretch")
-    if ok:
-        try:
-            store.sign_in(email.strip(), pw)
-        except Exception:
-            st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
-        else:
-            ss.remember = keep
-            st.rerun()
+    if ss.get("signup_sent"):
+        st.success(f"{ss.signup_sent} に確認メールを送りました。メールのリンクを開いてから、ここでログインしてください。")
+    if ss.pop("goto_login", False) or "auth_mode" not in ss:
+        ss.auth_mode = "ログイン"
+    mode = st.segmented_control("ログインか新規登録", ["ログイン", "新規登録"], key="auth_mode",
+                                label_visibility="collapsed") or "ログイン"
+    keep_help = "この端末では、次から開いたときにログインしなくてすみます。共用の端末ではオフにしてください。"
+    if mode == "ログイン":
+        with st.form("login"):
+            email = st.text_input("メールアドレス", autocomplete="email")
+            pw = st.text_input("パスワード", type="password", autocomplete="current-password")
+            keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True, help=keep_help)
+            ok = st.form_submit_button("ログイン", type="primary", width="stretch")
+        if ok:
+            try:
+                store.sign_in(email.strip(), pw)
+            except Exception as e:  # noqa: BLE001
+                if "not confirmed" in str(e).lower():
+                    st.error("メールアドレスの確認がまだです。届いた確認メールのリンクを開いてから、もう一度ログインしてください。")
+                else:
+                    st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
+            else:
+                ss.remember = keep
+                ss.pop("signup_sent", None)
+                st.rerun()
+    else:
+        st.caption("はじめて使う方は、メールアドレスとパスワードを登録してください。"
+                   "パートナーも、それぞれ自分のアカウントを登録します。")
+        with st.form("signup"):
+            email = st.text_input("メールアドレス", autocomplete="email")
+            pw = st.text_input("パスワード（8文字以上）", type="password", autocomplete="new-password")
+            pw2 = st.text_input("パスワード（もう一度）", type="password", autocomplete="new-password")
+            keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True, help=keep_help)
+            st.caption("このアプリの日付は目安です。実際の予定はクリニックの指示に従ってください。")
+            ok = st.form_submit_button("登録する", type="primary", width="stretch")
+        if ok:
+            email = email.strip()
+            if "@" not in email:
+                st.error("メールアドレスを確認してください。")
+            elif len(pw) < 8:
+                st.error("パスワードは8文字以上にしてください。")
+            elif pw != pw2:
+                st.error("2回入力したパスワードが違います。")
+            else:
+                try:
+                    logged_in = store.sign_up(email, pw, st.context.url)
+                except Exception as e:  # noqa: BLE001
+                    msg = str(e).lower()
+                    if "already registered" in msg:
+                        st.error("このメールアドレスはすでに登録されています。「ログイン」から入ってください。")
+                    elif "not allowed" in msg or "disabled" in msg:
+                        st.error("いまは新規登録を受け付けていません。")
+                    elif "rate limit" in msg or "security purposes" in msg:
+                        st.error("短い時間に登録が集中しています。しばらくたってからもう一度試してください。")
+                    elif "password" in msg:
+                        st.error("このパスワードは使えません。もう少し長く、推測されにくいものにしてください。")
+                    else:
+                        st.error(f"登録できませんでした。（{e}）")
+                else:
+                    if logged_in:
+                        ss.remember = keep
+                        ss.flash = "登録しました"
+                    else:
+                        ss.signup_sent = email
+                        ss.goto_login = True
+                    st.rerun()
     st.stop()
 
 sync_cookie()

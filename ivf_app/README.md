@@ -16,8 +16,9 @@
 
 1. https://supabase.com でプロジェクトを作る（リージョンは Tokyo がおすすめ）
 2. 左メニュー **SQL Editor** → `supabase/schema.sql` の中身を貼って **Run**
-3. **Authentication → Users → Add user → Create new user** で、自分とパートナーのメールアドレスとパスワードをそれぞれ登録（「Auto Confirm User」にチェック）
-4. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ**（他人が登録できないようにする）
+3. **Authentication → Sign In / Providers** で **Allow new users to sign up をオン**、**Confirm email もオン**（アプリの「新規登録」から誰でも登録でき、メールの確認後に使えるようになる）
+4. **Authentication → URL Configuration** の **Site URL** に、公開したアプリの URL（例：`https://xxxx.streamlit.app`）を入れる（確認メールのリンクの戻り先）
+   - Supabase 標準のメール送信は1時間あたりの通数が少ないので、利用者が増えたら **Authentication → Emails → SMTP Settings** で独自のメール送信を設定する
 5. **Project Settings → API Keys** で、次の2つを控える
    - Project URL（`https://xxxx.supabase.co`）
    - **anon** キー（Legacy API Keys のタブにある `eyJ...` で始まるもの）
@@ -28,6 +29,7 @@
 
 ### パートナーとの共有
 
+0. 2人ともアプリの「新規登録」でアカウントを作る
 1. 片方がログインし、「新しく始める」で暗証番号（数字4〜12桁）を決める
 2. もう片方が自分のアカウントでログインし、「パートナーに参加する」で相手のメールアドレスと暗証番号を入力する
 3. 以後、2人とも同じ予定を見て、どちらからでも直せます。同時に直した場合は、後から保存した側に「最新を読み込みました」と出て、上書きはされません

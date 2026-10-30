@@ -45,6 +45,21 @@ def sign_in(email: str, password: str) -> None:
     _set_user(res.user)
 
 
+def sign_up(email: str, password: str, redirect_to: str | None = None) -> bool:
+    """新規登録。そのままログインできたら True、確認メールの確認待ちなら False。"""
+    opts = {"email_redirect_to": redirect_to} if redirect_to else {}
+    res = _client().auth.sign_up({"email": email, "password": password, "options": opts})
+    if res.user is None:
+        raise RuntimeError("登録できませんでした")
+    # すでに登録済みのアドレスだと、確認待ちに見える空のユーザーが返る
+    if not res.user.identities:
+        raise RuntimeError("User already registered")
+    if res.session is None:
+        return False
+    _set_user(res.user)
+    return True
+
+
 def restore(refresh_token: str) -> bool:
     """保存しておいたリフレッシュトークンでログインし直す。"""
     try:
