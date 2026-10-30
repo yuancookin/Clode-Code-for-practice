@@ -28,9 +28,13 @@ def configured() -> bool:
 def _client():
     # ログイン状態は利用者ごとに違うので、キャッシュせずセッションごとに作る
     if "sb" not in st.session_state:
-        from supabase import create_client
+        from supabase import ClientOptions, create_client
 
-        st.session_state.sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+        # 裏でのトークン自動更新は止める。更新されるとリフレッシュトークンが変わり、
+        # Cookie に保存した古いトークンで次回ログインし直せなくなるため。
+        # 更新は操作のたびに _fresh() で行い、app.py の sync_cookie() が Cookie を書き換える。
+        st.session_state.sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"],
+                                            options=ClientOptions(auto_refresh_token=False))
     return st.session_state.sb
 
 
