@@ -1,6 +1,8 @@
 """体外受精スケジュール（通院予測カレンダー）  —  streamlit run app.py"""
 import calendar
+import json
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import quote, unquote
 
 import pandas as pd
 import streamlit as st
@@ -104,13 +106,53 @@ def bar(compact=True):
         )
 
 
+def heading(title, sub=None):
+    st.markdown(f'<div class="ivf-h">{title}</div>' + (f'<div class="ivf-sub">{sub}</div>' if sub else ""),
+                unsafe_allow_html=True)
+
+
+# ---------- ログインの保持（リフレッシュトークンを Cookie に入れておく） ----------
+COOKIE = "ivf_rt"
+KEEP_DAYS = 30
+
+
+def write_cookie(value, max_age):
+    host = st.context.headers.get("host", "")
+    secure = "" if host.startswith(("localhost", "127.0.0.1")) else "; Secure"
+    c = f"{COOKIE}={quote(value)}; Max-Age={max_age}; Path=/; SameSite=Lax{secure}"
+    st.html(f"<script>document.cookie = {json.dumps(c)};</script>", unsafe_allow_javascript=True)
+
+
+def sync_cookie():
+    """「ログインしたままにする」なら、最新のトークンを Cookie に入れ直す（トークンは更新のたびに変わる）。"""
+    if not (USE_DB and ss.get("remember") and store.user()):
+        return
+    rt = store.refresh_token()
+    if rt and rt != ss.get("rt_saved"):
+        write_cookie(rt, KEEP_DAYS * 86400)
+        ss.rt_saved = rt
+
+
+if USE_DB and not store.user() and not ss.get("restore_tried"):
+    ss.restore_tried = True
+    rt = st.context.cookies.get(COOKIE)
+    if rt:
+        if store.restore(unquote(rt)):
+            ss.remember = True
+        else:
+            ss.clear_cookie = True
+
 # ---------- ログイン ----------
 if USE_DB and not store.user():
+    if ss.pop("clear_cookie", False):
+        write_cookie("", 0)
     bar(compact=False)
     st.caption("予定を見るには、ログインしてください。")
     with st.form("login"):
         email = st.text_input("メールアドレス", autocomplete="email")
         pw = st.text_input("パスワード", type="password", autocomplete="current-password")
+        keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True,
+                           help="この端末では、次から開いたときにログインしなくてすみます。共用の端末ではオフにしてください。")
         ok = st.form_submit_button("ログイン", type="primary", width="stretch")
     if ok:
         try:
@@ -118,7 +160,75 @@ if USE_DB and not store.user():
         except Exception:
             st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
         else:
+            ss.remember = keep
             st.rerun()
+    st.stop()
+
+sync_cookie()
+
+
+def logout_button(key="logout"):
+    if st.button("ログアウト", icon=":material/logout:", key=key):
+        store.sign_out()
+        ss.restore_tried = True
+        ss.clear_cookie = True
+        st.rerun()
+
+
+# ---------- 共有スペース（パートナーと同じ予定を見る） ----------
+if USE_DB and "group" not in ss:
+    try:
+        ss.group = store.group_info()
+    except Exception as e:  # noqa: BLE001
+        st.error(f"共有の設定を読み込めませんでした。schema.sql を最新にしたか確認してください。（{e}）")
+        st.stop()
+
+if USE_DB and not ss.group:
+    bar()
+    with st.container(border=True):
+        heading("パートナーと予定を共有する",
+                "はじめに1回だけ設定します。片方が「新しく始める」で暗証番号を決め、"
+                "もう片方が「パートナーに参加する」で相手のメールアドレスと暗証番号を入れると、"
+                "2人で同じ予定を見て、どちらからでも直せるようになります。")
+        how = st.segmented_control("どちらにしますか", ["新しく始める", "パートナーに参加する"],
+                                   default="新しく始める", key="g_how") or "新しく始める"
+        if how == "新しく始める":
+            pin = st.text_input("暗証番号を決める（数字4〜12桁）", type="password", max_chars=12, key="g_pin")
+            pin2 = st.text_input("もう一度入力", type="password", max_chars=12, key="g_pin2")
+            st.caption("パートナーが参加するときに、あなたのメールアドレスと一緒に入力します。"
+                       "今までに作った予定は、この共有スペースに引き継がれます。")
+            if st.button("共有スペースを作る", type="primary", width="stretch"):
+                if not (pin.isdigit() and 4 <= len(pin) <= 12):
+                    st.error("暗証番号は数字4〜12桁にしてください。")
+                elif pin != pin2:
+                    st.error("2回入力した暗証番号が違います。")
+                else:
+                    try:
+                        store.create_group(pin)
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"作れませんでした。（{e}）")
+                    else:
+                        ss.pop("group", None)
+                        ss.flash = "共有スペースを作りました"
+                        st.rerun()
+        else:
+            owner = st.text_input("パートナーのメールアドレス", key="g_owner")
+            pin = st.text_input("パートナーが決めた暗証番号", type="password", max_chars=12, key="g_jpin")
+            if st.button("参加する", type="primary", width="stretch"):
+                try:
+                    joined = store.join_group(owner.strip(), pin)
+                except Exception as e:  # noqa: BLE001
+                    if "too many attempts" in str(e):
+                        st.error("まちがいが続いたので、1時間ほどたってからもう一度試してください。")
+                    else:
+                        st.error(f"参加できませんでした。（{e}）")
+                else:
+                    if joined:
+                        ss.pop("group", None)
+                        ss.flash = "パートナーの共有スペースに参加しました"
+                        st.rerun()
+                    st.error("メールアドレスか暗証番号が違います。")
+    logout_button("logout_setup")
     st.stop()
 
 # ---------- 状態 ----------
@@ -133,11 +243,21 @@ if "base" not in ss:
             st.stop()
         ss.base = loaded
         ss.saved = loaded
+        ss.version = ss.group["version"]
     else:
         ss.params = S.Params()
         ss.base = S.generate(S.default_cycles(ss.params), ss.params)
 if "events" not in ss:
     ss.events = ss.base
+
+
+def reload(msg):
+    """共有スペースの最新の予定を読み込み直す（パートナーの変更を反映する）。"""
+    loaded = store.load_events()
+    ss.group = store.group_info()
+    ss.version = ss.group["version"]
+    ss.saved = loaded
+    set_base(loaded, msg)
 
 
 def set_base(df, msg=None):
@@ -245,11 +365,6 @@ def edit_day(d):
         st.rerun()
 
 
-def heading(title, sub=None):
-    st.markdown(f'<div class="ivf-h">{title}</div>' + (f'<div class="ivf-sub">{sub}</div>' if sub else ""),
-                unsafe_allow_html=True)
-
-
 bar()
 # 説明は予定がまだないとき（最初）だけ出す
 if len(ss.base) == 0:
@@ -291,7 +406,10 @@ with tab_edit:
     # 変更があれば Supabase に自動保存
     if USE_DB and not ev.equals(ss.get("saved")):
         try:
-            store.save_events(ev)
+            ss.version = store.save_events(ev, ss.version)
+        except store.Conflict:
+            # パートナーが先に保存していたら、上書きせずに最新を読み込む
+            reload("パートナーが予定を更新していたので、最新の予定を読み込みました。もう一度直してください。")
         except Exception as e:  # noqa: BLE001
             save_status.error(f"保存できませんでした。通信状態を確認して、もう一度操作してください。（{e}）")
         else:
@@ -498,8 +616,21 @@ with tab_out:
                 set_base(loaded, "CSVを読み込みました")
 
     if USE_DB:
+        with st.container(border=True):
+            g = ss.group or {}
+            members = g.get("members") or []
+            heading("パートナーと共有",
+                    "同じ共有スペースのメンバーは、同じ予定を見て、どちらからでも直せます。"
+                    "相手が直した内容は、開き直すか下のボタンで読み込まれます。")
+            st.markdown("<br>".join(f"・{m}" + ("（作った人）" if m == g.get("owner_email") else "") for m in members),
+                        unsafe_allow_html=True)
+            if len(members) < 2:
+                st.caption(f"パートナーは、自分のアカウントでログインしたあと「パートナーに参加する」を選び、"
+                           f"{g.get('owner_email', '')} と暗証番号を入力してください。")
+            if st.button("最新の予定を読み込む", icon=":material/sync:", width="stretch"):
+                reload("最新の予定を読み込みました")
         u = store.user() or {}
         st.caption(f"ログイン中：{u.get('email', '')}")
-        if st.button("ログアウト", icon=":material/logout:"):
-            store.sign_out()
-            st.rerun()
+        logout_button()
+
+sync_cookie()

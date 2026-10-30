@@ -16,12 +16,23 @@
 
 1. https://supabase.com でプロジェクトを作る（リージョンは Tokyo がおすすめ）
 2. 左メニュー **SQL Editor** → `supabase/schema.sql` の中身を貼って **Run**
-3. **Authentication → Users → Add user → Create new user** で、自分のメールアドレスとパスワードを登録（「Auto Confirm User」にチェック）
+3. **Authentication → Users → Add user → Create new user** で、自分とパートナーのメールアドレスとパスワードをそれぞれ登録（「Auto Confirm User」にチェック）
 4. **Authentication → Sign In / Providers** で **Allow new users to sign up をオフ**（他人が登録できないようにする）
 5. **Project Settings → API Keys** で、次の2つを控える
    - Project URL（`https://xxxx.supabase.co`）
    - **anon** キー（Legacy API Keys のタブにある `eyJ...` で始まるもの）
    - ※ `service_role` / secret キーは絶対に使わない
+   - 新しい publishable key（`sb_publishable_...`）でも動きます
+
+> アプリを更新して `schema.sql` が変わったときは、同じように SQL Editor で最新の中身を貼って Run します（何度実行しても大丈夫です）。
+
+### パートナーとの共有
+
+1. 片方がログインし、「新しく始める」で暗証番号（数字4〜12桁）を決める
+2. もう片方が自分のアカウントでログインし、「パートナーに参加する」で相手のメールアドレスと暗証番号を入力する
+3. 以後、2人とも同じ予定を見て、どちらからでも直せます。同時に直した場合は、後から保存した側に「最新を読み込みました」と出て、上書きはされません
+
+ログイン画面の「ログインしたままにする」をオンにすると、その端末では30日間ログインせずに開けます。
 
 ### 2. GitHub
 

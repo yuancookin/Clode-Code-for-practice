@@ -2,6 +2,9 @@
 
 st.secrets に SUPABASE_URL と SUPABASE_KEY（anon / publishable key）があるときだけ使う。
 ない場合はアプリは「保存なしのお試しモード」で動く。
+
+予定は「共有スペース」（ivf_groups）ごとに保存する。パートナーは相手のメールアドレスと
+暗証番号で同じ共有スペースに参加し、同じ予定を見たり直したりできる。
 """
 from __future__ import annotations
 
@@ -9,6 +12,10 @@ import pandas as pd
 import streamlit as st
 
 import schedule as S
+
+
+class Conflict(Exception):
+    """パートナーが先に保存していた（版番号が合わない）。"""
 
 
 def configured() -> bool:
@@ -27,11 +34,36 @@ def _client():
     return st.session_state.sb
 
 
+def _set_user(u) -> None:
+    st.session_state.sb_user = {"id": u.id, "email": u.email}
+
+
 def sign_in(email: str, password: str) -> None:
     res = _client().auth.sign_in_with_password({"email": email, "password": password})
     if res.user is None:
         raise RuntimeError("ログインできませんでした")
-    st.session_state.sb_user = {"id": res.user.id, "email": res.user.email}
+    _set_user(res.user)
+
+
+def restore(refresh_token: str) -> bool:
+    """保存しておいたリフレッシュトークンでログインし直す。"""
+    try:
+        res = _client().auth.refresh_session(refresh_token)
+    except Exception:
+        return False
+    if res.user is None:
+        return False
+    _set_user(res.user)
+    return True
+
+
+def refresh_token() -> str | None:
+    """今のセッションのリフレッシュトークン（更新されるたびに変わる）。"""
+    try:
+        s = _client().auth.get_session()
+    except Exception:
+        return None
+    return s.refresh_token if s else None
 
 
 def sign_out() -> None:
@@ -55,16 +87,44 @@ def _fresh():
         pass
 
 
+# ---------- 共有スペース ----------
+
+def group_info() -> dict | None:
+    """{"group_id", "version", "owner_email", "members"}。まだ入っていなければ None。"""
+    _fresh()
+    return _client().rpc("ivf_group_info").execute().data
+
+
+def create_group(pin: str) -> None:
+    _fresh()
+    _client().rpc("create_ivf_group", {"p_pin": pin}).execute()
+
+
+def join_group(owner_email: str, pin: str) -> bool:
+    """参加できたら True。メールアドレスか暗証番号が違えば False。"""
+    _fresh()
+    return bool(_client().rpc("join_ivf_group", {"p_owner_email": owner_email, "p_pin": pin}).execute().data)
+
+
+# ---------- 予定 ----------
+
 def load_events() -> pd.DataFrame:
     _fresh()
     res = _client().table("ivf_events").select("date,kind,memo,cycle").order("date").execute()
     return S.rows_to_df(res.data)
 
 
-def save_events(df: pd.DataFrame) -> None:
-    """自分の予定をまるごと置き換える（SQL関数の中で1回のトランザクション）。"""
+def save_events(df: pd.DataFrame, version: int | None) -> int:
+    """共有スペースの予定をまるごと置き換え、新しい版番号を返す。
+    version が古ければ Conflict（パートナーが先に保存していた）。"""
     _fresh()
-    _client().rpc("replace_ivf_events", {"p_rows": S.df_to_rows(df)}).execute()
+    try:
+        res = _client().rpc("replace_ivf_events", {"p_rows": S.df_to_rows(df), "p_version": version}).execute()
+    except Exception as e:  # noqa: BLE001
+        if "version conflict" in str(e):
+            raise Conflict() from e
+        raise
+    return int(res.data)
 
 
 def load_params() -> dict | None:
