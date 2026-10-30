@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IVF</title>
+<!-- iPhone の「ホーム画面に追加」で使うアイコンと名前（このページに最初から書いておく） -->
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="favicon.png">
+<meta name="apple-mobile-web-app-title" content="IVF">
+<meta name="theme-color" content="#EFEAF7">
+<script>
+  // 体外受精スケジュールのアプリ（Streamlit Community Cloud）への入口。
+  // ?open=1 付きで開かれたら（＝ホーム画面のアイコンから）すぐアプリへ移る。
+  // 付いていなければ追加の案内を出し、URL に ?open=1 を付けておく
+  // （iPhone はこの時点の URL をホーム画面に登録する）。
+  var APP = "https://ivf-schedule-yuan.streamlit.app/";
+  if (new URLSearchParams(location.search).has("open")) {
+    location.replace(APP);
+  } else {
+    history.replaceState(null, "", "?open=1");
+  }
+</script>
+<style>
+  :root { --ink: #221e28; --mute: #6b6577; --accent: #7862aa; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, #f0ebf8 0%, #dbd0ed 100%);
+    color: var(--ink); font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+    padding: 24px 16px;
+  }
+  main { max-width: 420px; width: 100%; text-align: center; }
+  img { width: 112px; height: 112px; border-radius: 26px; box-shadow: 0 6px 20px rgba(34, 30, 40, .12); }
+  h1 { font-family: "Cormorant Garamond", Garamond, "Times New Roman", serif; font-weight: 300;
+       font-size: 40px; letter-spacing: .02em; margin: 18px 0 2px; }
+  h1 em { color: var(--accent); }
+  .ja { font-size: 11px; letter-spacing: .32em; color: var(--mute); margin-bottom: 26px; }
+  ol { text-align: left; background: rgba(255, 255, 255, .6); border-radius: 16px; padding: 16px 16px 16px 36px;
+       font-size: 14px; line-height: 1.9; margin: 0 0 20px; }
+  a.btn { display: block; background: var(--ink); color: #fff; text-decoration: none; border-radius: 999px;
+          padding: 12px; font-size: 14px; letter-spacing: .06em; }
+</style>
+</head>
+<body>
+<main>
+  <img src="icon-512.png" alt="">
+  <h1>IVF <em>schedule</em></h1>
+  <div class="ja">体外受精スケジュール</div>
+  <ol>
+    <li>Safari の下にある共有ボタン（□に↑）を押す</li>
+    <li>「ホーム画面に追加」を押して、「追加」を押す</li>
+    <li>ホーム画面のカエルのアイコンから開くと、アプリが開きます</li>
+  </ol>
+  <a class="btn" href="https://ivf-schedule-yuan.streamlit.app/">いますぐアプリを開く</a>
+</main>
+</body>
+</html>
