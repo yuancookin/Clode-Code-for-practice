@@ -1,0 +1,98 @@
+name: Stock analyzer
+
+on:
+  push:
+    branches: ["main", "claude/stock-analyzer"]
+    paths: ["stock-analyzer/**", ".github/workflows/stock-analyzer.yml"]
+  pull_request:
+    paths: ["stock-analyzer/**", ".github/workflows/stock-analyzer.yml"]
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "検証する銘柄（空白区切り。空なら主要30銘柄）"
+        required: false
+        default: ""
+      period:
+        description: "取得期間（例: 5y, 10y）"
+        required: false
+        default: "5y"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: stock-analyzer
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: stock-analyzer/requirements.txt
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  screen:
+    # 直近の終値で、多数の銘柄に買いの判定をかける（Yahoo Finance から株価を取得）
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: stock-analyzer/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Screen buy candidates
+        continue-on-error: true
+        env:
+          TICKERS: ${{ github.event.inputs.tickers }}
+        run: |
+          python screen.py $TICKERS --out screen.md
+          cat screen.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screen-report
+          path: stock-analyzer/screen.md
+          if-no-files-found: ignore
+
+  backtest:
+    # 実際の銘柄で売買ルールを過去検証する（Yahoo Finance から株価を取得）
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: stock-analyzer/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Backtest on real tickers
+        # Yahoo 側の制限で取得に失敗することがあるので、失敗しても CI 全体は赤にしない
+        continue-on-error: true
+        env:
+          TICKERS: ${{ github.event.inputs.tickers }}
+          PERIOD: ${{ github.event.inputs.period || '5y' }}
+        run: |
+          python backtest_report.py $TICKERS --period "$PERIOD" --out report.md --csv trades.csv
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest-report
+          path: |
+            stock-analyzer/report.md
+            stock-analyzer/trades.csv
+          if-no-files-found: ignore
