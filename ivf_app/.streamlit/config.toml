@@ -9,6 +9,10 @@ baseRadius = "large"
 borderColor = "#C6D4DF"
 showWidgetBorder = true
 
+[server]
+# static/ のアイコン画像を app/static/... で配信する（ホーム画面用アイコン）
+enableStaticServing = true
+
 [client]
 toolbarMode = "minimal"
 

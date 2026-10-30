@@ -1,6 +1,7 @@
 """体外受精スケジュール（通院予測カレンダー）  —  streamlit run app.py"""
 import calendar
 import json
+import os
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote, unquote
 
@@ -10,7 +11,33 @@ import streamlit as st
 import schedule as S
 import store
 
-st.set_page_config(page_title="体外受精スケジュール", page_icon="📅", layout="centered")
+HERE = os.path.dirname(os.path.abspath(__file__))
+st.set_page_config(page_title="体外受精スケジュール", page_icon=os.path.join(HERE, "static", "icon-512.png"),
+                   layout="centered")
+
+# iPhone の「ホーム画面に追加」で使うアイコンと名前。
+# Streamlit Cloud ではアプリが同じドメインの iframe の中で動くので、外側のページにも入れる。
+st.html(
+    """<script>
+    (function () {
+      const icon = new URL("app/static/apple-touch-icon.png", location.href).href;
+      const docs = [document];
+      try { if (window.parent !== window && window.parent.document) docs.push(window.parent.document); } catch (e) {}
+      for (const doc of docs) {
+        const put = (sel, tag, attrs) => {
+          let el = doc.head.querySelector(sel);
+          if (!el) { el = doc.createElement(tag); doc.head.appendChild(el); }
+          for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+        };
+        put('link[rel="apple-touch-icon"]', "link", {rel: "apple-touch-icon", href: icon});
+        put('meta[name="apple-mobile-web-app-title"]', "meta", {name: "apple-mobile-web-app-title", content: "IVF"});
+        put('meta[name="apple-mobile-web-app-capable"]', "meta", {name: "apple-mobile-web-app-capable", content: "yes"});
+        put('meta[name="theme-color"]', "meta", {name: "theme-color", content: "#EFEAF7"});
+      }
+    })();
+    </script>""",
+    unsafe_allow_javascript=True,
+)
 
 JST = timezone(timedelta(hours=9))
 TODAY = datetime.now(JST).date()
