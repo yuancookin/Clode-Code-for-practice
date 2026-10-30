@@ -1,9 +1,16 @@
 [theme]
 base = "light"
-primaryColor = "#378ADD"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F4F3EF"
-textColor = "#2B2A27"
+primaryColor = "#E04A2C"
+backgroundColor = "#DCE6EE"
+secondaryBackgroundColor = "#EEF3F7"
+textColor = "#1E2A33"
+font = "Zen Kaku Gothic New:https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@300;400;500;700&display=swap"
+baseRadius = "large"
+borderColor = "#C6D4DF"
+showWidgetBorder = true
+
+[client]
+toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false

@@ -10,6 +10,9 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 
 WD = "月火水木金土日"
+EN_WD = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+EN_MONTH = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+            "October", "November", "December"]
 
 # 種類 → (背景色, 文字色)。並び順 = 同じ日に重なったときの優先度（上ほど優先）
 KINDS: dict[str, tuple[str, str]] = {
@@ -217,26 +220,31 @@ def by_day(df: pd.DataFrame) -> dict[date, list[dict]]:
 
 CAL_CSS = """
 <style>
-.ivf-legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin:4px 0 10px;font-size:12px;color:#3b3a36}
-.ivf-legend span{display:inline-flex;align-items:center;gap:5px}
-.ivf-legend i{display:inline-block;width:12px;height:12px;border-radius:3px}
-.ivf-month{margin:14px 0 4px;font-weight:700;font-size:15px;color:#2b2a27}
-.ivf-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
-.ivf-wd{font-size:11px;text-align:center;color:#77756e;padding:2px 0}
-.ivf-wd.sun{color:#c0443a}.ivf-wd.sat{color:#2f6db5}
-.ivf-c{min-height:52px;border-radius:6px;background:#F4F3EF;padding:3px 2px;text-align:center;overflow:hidden}
+.ivf-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:10px 0 4px}
+.ivf-legend span{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#5E7183;letter-spacing:.04em}
+.ivf-legend i{display:inline-block;width:7px;height:7px;border-radius:50%}
+.ivf-cal{background:rgba(255,255,255,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.7);border-radius:18px;padding:14px 10px 10px;margin:12px 0}
+.ivf-month{margin:0 4px 10px;display:flex;align-items:baseline;justify-content:space-between}
+.ivf-month .en{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:30px;line-height:1;color:#1E2A33}
+.ivf-month small{font-size:11px;letter-spacing:.24em;color:#5E7183}
+.ivf-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.ivf-wd{font-size:10px;text-align:center;color:#5E7183;padding:0 0 3px;letter-spacing:.1em}
+.ivf-wd.sun{color:#E04A2C}.ivf-wd.sat{color:#2F6DB5}
+.ivf-c{min-height:54px;border-radius:10px;background:rgba(255,255,255,.6);padding:4px 2px;text-align:center;overflow:hidden}
 .ivf-c.empty{background:transparent}
-.ivf-c .n{font-size:13px;font-weight:700;line-height:1.2}
-.ivf-c .l{font-size:9.5px;line-height:1.2;margin-top:1px;word-break:break-all}
-.ivf-c.today{outline:2px solid #2b2a27;outline-offset:-2px}
-.ivf-c.plain .n{color:#9a988f;font-weight:500}
-@media (min-width:700px){.ivf-c{min-height:64px}.ivf-c .l{font-size:11px}.ivf-c .n{font-size:14px}}
+.ivf-c .n{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:400;line-height:1.05}
+.ivf-c .l{font-size:9px;line-height:1.2;margin-top:2px;word-break:break-all;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ivf-c.today{box-shadow:0 0 0 2px #fff,0 0 0 3.5px #1E2A33;position:relative;z-index:1}
+.ivf-c.plain .n{color:#7D8E9C}
+.ivf-c.past{opacity:.45}
+@media (min-width:700px){.ivf-c{min-height:68px}.ivf-c .l{font-size:11px}.ivf-c .n{font-size:19px}}
 </style>
 """
 
 
-def legend_html() -> str:
-    items = "".join(f'<span><i style="background:{KINDS[k][0]}"></i>{k}</span>' for k in LEGEND_ORDER)
+def legend_html(kinds=None) -> str:
+    shown = [k for k in LEGEND_ORDER if kinds is None or k in kinds]
+    items = "".join(f'<span><i style="background:{KINDS[k][0]}"></i>{k}</span>' for k in shown)
     return f'<div class="ivf-legend">{items}</div>'
 
 
@@ -246,10 +254,11 @@ def calendar_html(df: pd.DataFrame, today: date | None = None) -> str:
     days = by_day(df)
     first, last = min(days), max(days)
     y, m = first.year, first.month
-    parts = [CAL_CSS, legend_html()]
+    parts = [CAL_CSS, legend_html(set(df["種類"]))]
     while (y, m) <= (last.year, last.month):
-        parts.append(f'<div class="ivf-month">{y}年{m}月</div><div class="ivf-grid">')
-        for i, w in enumerate("日月火水木金土"):
+        parts.append(f'<div class="ivf-cal"><div class="ivf-month"><span class="en">{EN_MONTH[m - 1]}</span>'
+                     f'<small>{y}年{m}月</small></div><div class="ivf-grid">')
+        for i, w in enumerate(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]):
             cls = " sun" if i == 0 else (" sat" if i == 6 else "")
             parts.append(f'<div class="ivf-wd{cls}">{w}</div>')
         lead = (date(y, m, 1).weekday() + 1) % 7
@@ -267,7 +276,7 @@ def calendar_html(df: pd.DataFrame, today: date | None = None) -> str:
                 continue
             d = dd.day
             evs = days.get(dd, [])
-            today_cls = " today" if dd == today else ""
+            today_cls = " today" if dd == today else (" past" if today and dd < today else "")
             if evs:
                 top = evs[0]  # normalize 済みなので優先度順
                 bg, fg = KINDS[top["種類"]]
@@ -283,8 +292,8 @@ def calendar_html(df: pd.DataFrame, today: date | None = None) -> str:
                 )
             else:
                 parts.append(f'<div class="ivf-c plain{today_cls}"><div class="n">{d}</div></div>')
-        parts.append("</div>")
-        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        parts.append("</div></div>")
+        y, m =(y + 1, 1) if m == 12 else (y, m + 1)
     return "".join(parts)
 
 
@@ -303,16 +312,42 @@ def _runs(df: pd.DataFrame, kinds) -> list[tuple[date, date, str, str, int]]:
     return runs
 
 
+def upcoming_runs(df: pd.DataFrame, today: date, n: int = 5) -> list[tuple[date, date, str, str, int]]:
+    """今日以降の主な予定（連続する日はまとめる）。"""
+    return [r for r in _runs(df, KEY_KINDS) if r[1] >= today][:n]
+
+
+def span_text(a: date, b: date) -> str:
+    return wd(a) if a == b else f"{wd(a)}〜{wd(b)}"
+
+
 def upcoming(df: pd.DataFrame, today: date, n: int = 5) -> list[str]:
-    out = []
-    for a, b, kind, lab, cyc in _runs(df, KEY_KINDS):
-        if b < today:
-            continue
-        span = wd(a) if a == b else f"{wd(a)}〜{wd(b)}"
-        out.append(f"{span}　{lab or kind}")
-        if len(out) >= n:
-            break
-    return out
+    return [f"{span_text(a, b)}　{lab or kind}" for a, b, kind, lab, _ in upcoming_runs(df, today, n)]
+
+
+def next_html(df: pd.DataFrame, today: date, n: int = 5) -> str:
+    """「次の予定」カード。いちばん近い予定を大きく、残りを一覧で出す。"""
+    runs = upcoming_runs(df, today, n)
+    if not runs:
+        return ""
+    a, b, kind, lab, _ = runs[0]
+    days = (a - today).days
+    when = "今日" if days <= 0 else ("明日" if days == 1 else f"あと{days}日")
+    until = f'<div class="until">〜{wd(b)}</div>' if a != b else ""
+    rows = "".join(
+        f'<li><i style="background:{KINDS[k][0]}"></i><span class="d">{span_text(x, y)}</span>'
+        f'<span class="t">{html.escape(l or k)}</span></li>'
+        for x, y, k, l, _ in runs[1:]
+    )
+    return (
+        '<div class="ivf-hero">'
+        '<div class="lbl">NEXT — 次の予定</div>'
+        f'<div class="row"><div class="big">{a.month}.{a.day:02d}<small>{EN_WD[a.weekday()]}</small></div>'
+        f'<div class="side"><span class="badge">{when}</span>'
+        f'<div class="ttl">{html.escape(lab or kind)}</div>{until}</div></div>'
+        + (f'<ul>{rows}</ul>' if rows else "")
+        + "</div>"
+    )
 
 
 def line_text(df: pd.DataFrame) -> str:
