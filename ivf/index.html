@@ -14,7 +14,8 @@
   // ?open=1 付きで開かれたら（＝ホーム画面のアイコンから）すぐアプリへ移る。
   // 付いていなければ追加の案内を出し、URL に ?open=1 を付けておく
   // （iPhone はこの時点の URL をホーム画面に登録する）。
-  var APP = "https://ivf-schedule-yuan.streamlit.app/";
+  // ?embed=true：Streamlit の浮いたバッジ（王冠など）を消して、下に細いバーだけにする
+  var APP = "https://ivf-schedule-yuan.streamlit.app/?embed=true";
   if (new URLSearchParams(location.search).has("open")) {
     location.replace(APP);
   } else {
@@ -52,7 +53,7 @@
     <li>「ホーム画面に追加」を押して、「追加」を押す</li>
     <li>ホーム画面のカエルのアイコンから開くと、アプリが開きます</li>
   </ol>
-  <a class="btn" href="https://ivf-schedule-yuan.streamlit.app/">いますぐアプリを開く</a>
+  <a class="btn" href="https://ivf-schedule-yuan.streamlit.app/?embed=true">いますぐアプリを開く</a>
 </main>
 </body>
 </html>
