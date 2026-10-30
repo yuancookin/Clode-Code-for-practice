@@ -30,7 +30,18 @@ st.markdown(
     .ivf-bar .ja{font-size:11px;letter-spacing:.32em;color:var(--mute);font-weight:500}
     .ivf-bar .today{font-size:11px;letter-spacing:.12em;color:var(--ink);text-align:right;line-height:1.5}
     .ivf-bar .today b{font-family:'Cormorant Garamond',serif;font-weight:400;font-size:22px;letter-spacing:0;display:block}
+    /* ログイン後は1行の小さな見出しにして、カレンダーを広く見せる */
+    .ivf-bar.compact{display:flex;justify-content:space-between;align-items:flex-end;margin:0 0 8px;padding-bottom:6px}
+    .ivf-bar.compact .logo{font-size:30px;line-height:1}
+    .ivf-bar.compact .ja{font-size:9px;letter-spacing:.3em;margin-top:3px}
+    .ivf-bar.compact .today{font-size:9px}
+    .ivf-bar.compact .today b{font-size:19px}
     .ivf-intro{font-size:13px;color:var(--mute);line-height:1.9;margin:-6px 0 16px;font-weight:400}
+    /* 月の切り替えボタン */
+    .st-key-calnav{gap:6px!important;margin-top:4px}
+    .st-key-calnav button{min-height:32px;padding:0 12px;border-radius:999px;background:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.8);color:var(--ink)}
+    .st-key-calnav button p{font-size:12.5px;letter-spacing:.06em}
+    .st-key-calnav button:disabled{opacity:.45;background:transparent}
     /* タブ：細い下線だけ */
     div[data-testid="stTabs"] [data-baseweb="tab-list"]{gap:0;background:transparent;border-bottom:1px solid var(--line)}
     div[data-testid="stTabs"] [data-baseweb="tab"]{flex:1 1 0;justify-content:center;height:40px;padding:0 2px;background:transparent}
@@ -44,17 +55,17 @@ st.markdown(
     .ivf-sub{font-size:12px;color:var(--mute);margin:0 0 8px;line-height:1.7}
     div[data-testid="stCaptionContainer"],div[data-testid="stCaptionContainer"] p{color:var(--mute)!important}
     /* 次の予定 */
-    .ivf-hero{margin:18px 0 6px;padding:0 0 14px;border-bottom:1px solid var(--line)}
-    .ivf-hero .lbl{font-size:10.5px;letter-spacing:.32em;color:var(--mute);font-weight:500}
+    .ivf-hero{margin:10px 0 2px;padding:0 0 8px}
+    .ivf-hero .lbl{font-size:10px;letter-spacing:.32em;color:var(--mute);font-weight:500}
     .ivf-hero .row{display:flex;align-items:flex-end;gap:16px;margin-top:2px}
-    .ivf-hero .big{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:64px;line-height:.9;color:var(--ink);letter-spacing:-.01em}
+    .ivf-hero .big{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:52px;line-height:.9;color:var(--ink);letter-spacing:-.01em}
     .ivf-hero .big small{font-size:15px;letter-spacing:.2em;margin-left:6px;color:var(--mute);font-weight:400}
     .ivf-hero .side{padding-bottom:6px}
     .ivf-hero .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;border-radius:999px;padding:2px 10px;color:#fff;background:var(--accent)}
     .ivf-hero .ttl{font-size:20px;font-weight:700;color:var(--ink);margin-top:4px;letter-spacing:.04em}
     .ivf-hero .until{font-size:12px;color:var(--mute)}
-    .ivf-hero ul{list-style:none;margin:14px 0 0;padding:0}
-    .ivf-hero li{display:flex;align-items:center;gap:10px;font-size:13px;line-height:2.1;color:var(--ink);margin:0;border-top:1px solid rgba(30,42,51,.07)}
+    .ivf-hero ul{list-style:none;margin:8px 0 0;padding:0}
+    .ivf-hero li{display:flex;align-items:center;gap:10px;font-size:13px;line-height:1.95;color:var(--ink);margin:0;border-top:1px solid rgba(30,42,51,.07)}
     .ivf-hero li i{width:7px;height:7px;border-radius:50%;flex:none}
     .ivf-hero li .d{color:var(--mute);min-width:9em;font-variant-numeric:tabular-nums;font-size:12.5px}
     .ivf-hero li .t{font-weight:500}
@@ -65,18 +76,25 @@ st.markdown(
 ss = st.session_state
 
 
-def bar():
-    st.markdown(
-        '<div class="ivf-bar"><div class="logo">IVF <em>schedule</em></div>'
-        '<div class="meta"><div class="ja">体外受精スケジュール</div>'
-        f'<div class="today">TODAY<b>{TODAY.month}.{TODAY.day:02d} {S.EN_WD[TODAY.weekday()]}</b></div></div></div>',
-        unsafe_allow_html=True,
-    )
+def bar(compact=True):
+    today = f'<div class="today">TODAY<b>{TODAY.month}.{TODAY.day:02d} {S.EN_WD[TODAY.weekday()]}</b></div>'
+    if compact:
+        st.markdown(
+            '<div class="ivf-bar compact"><div><div class="logo">IVF <em>schedule</em></div>'
+            f'<div class="ja">体外受精スケジュール</div></div>{today}</div>',
+            unsafe_allow_html=True,
+        )
+    else:  # ログイン画面は表紙のように大きく
+        st.markdown(
+            '<div class="ivf-bar"><div class="logo">IVF <em>schedule</em></div>'
+            f'<div class="meta"><div class="ja">体外受精スケジュール</div>{today}</div></div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ---------- ログイン ----------
 if USE_DB and not store.user():
-    bar()
+    bar(compact=False)
     st.caption("予定を見るには、ログインしてください。")
     with st.form("login"):
         email = st.text_input("メールアドレス", autocomplete="email")
@@ -209,8 +227,24 @@ with tab_cal:
     if len(ev) == 0:
         st.info("まだ予定がありません。「作り直す」タブで予定を作ってください。", icon=":material/event_note:")
     else:
-        st.markdown(S.next_html(ev, TODAY, 5), unsafe_allow_html=True)
-        st.markdown(S.calendar_html(ev, TODAY), unsafe_allow_html=True)
+        st.markdown(S.next_html(ev, TODAY, 3), unsafe_allow_html=True)
+
+        # 1か月ずつ表示。最初は今月（予定の期間外なら最初の月）
+        lo, hi = S.month_range(ev)
+        this_month = (TODAY.year, TODAY.month)
+        home = this_month if lo <= this_month <= hi else lo
+        if "cal_ym" not in ss or not (lo <= ss.cal_ym <= hi):
+            ss.cal_ym = home
+
+        def go(n):
+            ss.cal_ym = S.add_month(ss.cal_ym, n) if n else home
+
+        with st.container(horizontal=True, horizontal_alignment="distribute", key="calnav"):
+            st.button("‹ 前の月", on_click=go, args=(-1,), disabled=ss.cal_ym <= lo)
+            st.button("今月", on_click=go, args=(0,), disabled=ss.cal_ym == home)
+            st.button("次の月 ›", on_click=go, args=(1,), disabled=ss.cal_ym >= hi)
+        st.markdown(S.calendar_html(ev, TODAY, ss.cal_ym), unsafe_allow_html=True)
+        st.markdown(S.legend_html(set(ev["種類"])), unsafe_allow_html=True)
         st.caption("黒い枠が今日です。同じ日に予定が重なったときは、採卵・移植などを優先した色になります。日付は目安です。")
 
 # ---------- 作り直す ----------

@@ -223,14 +223,14 @@ CAL_CSS = """
 .ivf-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:10px 0 4px}
 .ivf-legend span{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#5E7183;letter-spacing:.04em}
 .ivf-legend i{display:inline-block;width:7px;height:7px;border-radius:50%}
-.ivf-cal{background:rgba(255,255,255,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.7);border-radius:18px;padding:14px 10px 10px;margin:12px 0}
+.ivf-cal{background:rgba(255,255,255,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.7);border-radius:18px;padding:12px 10px 10px;margin:8px 0}
 .ivf-month{margin:0 4px 10px;display:flex;align-items:baseline;justify-content:space-between}
 .ivf-month .en{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:30px;line-height:1;color:#1E2A33}
 .ivf-month small{font-size:11px;letter-spacing:.24em;color:#5E7183}
 .ivf-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
 .ivf-wd{font-size:10px;text-align:center;color:#5E7183;padding:0 0 3px;letter-spacing:.1em}
 .ivf-wd.sun{color:#E04A2C}.ivf-wd.sat{color:#2F6DB5}
-.ivf-c{min-height:54px;border-radius:10px;background:rgba(255,255,255,.6);padding:4px 2px;text-align:center;overflow:hidden}
+.ivf-c{min-height:48px;border-radius:10px;background:rgba(255,255,255,.6);padding:4px 2px;text-align:center;overflow:hidden}
 .ivf-c.empty{background:transparent}
 .ivf-c .n{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:400;line-height:1.05}
 .ivf-c .l{font-size:9px;line-height:1.2;margin-top:2px;word-break:break-all;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -248,14 +248,31 @@ def legend_html(kinds=None) -> str:
     return f'<div class="ivf-legend">{items}</div>'
 
 
-def calendar_html(df: pd.DataFrame, today: date | None = None) -> str:
+def month_range(df: pd.DataFrame) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """予定のある最初と最後の月 (年, 月)。"""
+    if len(df) == 0:
+        return None
+    first, last = min(df["日付"]), max(df["日付"])
+    return (first.year, first.month), (last.year, last.month)
+
+
+def add_month(ym: tuple[int, int], n: int) -> tuple[int, int]:
+    k = ym[0] * 12 + ym[1] - 1 + n
+    return k // 12, k % 12 + 1
+
+
+def calendar_html(df: pd.DataFrame, today: date | None = None, month: tuple[int, int] | None = None) -> str:
+    """month を指定するとその月だけ（全部の週）を描く。省略すると予定のある月をすべて描く。"""
     if len(df) == 0:
         return "<p>予定がまだありません。</p>"
     days = by_day(df)
     first, last = min(days), max(days)
-    y, m = first.year, first.month
-    parts = [CAL_CSS, legend_html(set(df["種類"]))]
-    while (y, m) <= (last.year, last.month):
+    y, m = month or (first.year, first.month)
+    end = month or (last.year, last.month)
+    parts = [CAL_CSS]
+    if month is None:
+        parts.append(legend_html(set(df["種類"])))
+    while (y, m) <= end:
         parts.append(f'<div class="ivf-cal"><div class="ivf-month"><span class="en">{EN_MONTH[m - 1]}</span>'
                      f'<small>{y}年{m}月</small></div><div class="ivf-grid">')
         for i, w in enumerate(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]):
@@ -269,7 +286,8 @@ def calendar_html(df: pd.DataFrame, today: date | None = None) -> str:
         cells = [None] * lead + [date(y, m, d) for d in range(1, ndays + 1)]
         cells += [None] * ((7 - len(cells) % 7) % 7)
         weeks = [cells[i:i + 7] for i in range(0, len(cells), 7)]
-        weeks = [w for w in weeks if any(c and week_start <= c <= week_end for c in w)]
+        if month is None:
+            weeks = [w for w in weeks if any(c and week_start <= c <= week_end for c in w)]
         for dd in (c for w in weeks for c in w):
             if dd is None:
                 parts.append('<div class="ivf-c empty"></div>')
