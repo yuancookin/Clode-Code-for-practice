@@ -25,6 +25,9 @@
    - ※ `service_role` / secret キーは絶対に使わない
    - 新しい publishable key（`sb_publishable_...`）でも動きます
 
+5. **Authentication → Emails → Reset Password** の本文に、確認コード `{{ .Token }}` を入れる（アプリの「パスワードを忘れた場合」は、このコードを画面に入力する方式）
+6. 自分以外の人にもメールを届けるには **Authentication → Emails → SMTP Settings** で独自のメール送信を設定する。Supabase 標準のメール送信は、組織のチームメンバーのアドレスにしか届かず、通数も少ない（新規登録の確認メールも同じ）
+
 > アプリを更新して `schema.sql` が変わったときは、同じように SQL Editor で最新の中身を貼って Run します（何度実行しても大丈夫です）。
 
 ### パートナーとの共有

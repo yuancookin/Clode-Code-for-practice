@@ -171,6 +171,87 @@ if USE_DB and not store.user() and not ss.get("restore_tried"):
         else:
             ss.clear_cookie = True
 
+# ---------- パスワードの再設定 ----------
+def start_password_reset():
+    ss.pw_reset = "email"
+
+
+def end_password_reset():
+    for k in ("pw_reset", "pw_email", "pw_verified"):
+        ss.pop(k, None)
+
+
+def password_reset_view(keep_help):
+    """メールで届いた確認コードを入れて、新しいパスワードを決める。"""
+    heading("パスワードの再設定")
+    if ss.pw_reset == "email":
+        st.caption("登録したメールアドレスに、確認コードをお送りします。")
+        with st.form("pw_email_form"):
+            email = st.text_input("メールアドレス", autocomplete="email")
+            sent = st.form_submit_button("確認コードを送る", type="primary", width="stretch")
+        if sent:
+            email = email.strip()
+            if "@" not in email:
+                st.error("メールアドレスを確認してください。")
+            else:
+                try:
+                    store.send_password_reset(email)
+                except Exception as e:  # noqa: BLE001
+                    msg = str(e).lower()
+                    if "rate limit" in msg or "security purposes" in msg:
+                        st.error("短い時間に何度も送っています。しばらくたってからもう一度試してください。")
+                    elif "not authorized" in msg:
+                        st.error("いまはこのメールアドレスにメールを送れません。アプリの管理者に連絡してください。")
+                    else:
+                        st.error(f"メールを送れませんでした。（{e}）")
+                else:
+                    ss.pw_email = email
+                    ss.pw_reset = "code"
+                    st.rerun()
+    else:
+        if ss.get("pw_verified"):
+            st.caption("確認コードは確認できました。新しいパスワードを入れてください。")
+        else:
+            st.caption(f"{ss.pw_email} が登録されていれば、確認コードが届きます。迷惑メールのフォルダも見てください。")
+        if ss.get("pw_error"):
+            st.error(ss.pop("pw_error"))
+        with st.form("pw_code_form"):
+            if not ss.get("pw_verified"):
+                code = st.text_input("確認コード（メールに書かれた数字）", max_chars=10, autocomplete="one-time-code")
+            pw = st.text_input("新しいパスワード（8文字以上）", type="password", autocomplete="new-password")
+            pw2 = st.text_input("新しいパスワード（もう一度）", type="password", autocomplete="new-password")
+            keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True, help=keep_help)
+            ok = st.form_submit_button("パスワードを変更する", type="primary", width="stretch")
+        if ok:
+            if len(pw) < 8:
+                st.error("パスワードは8文字以上にしてください。")
+            elif pw != pw2:
+                st.error("2回入力したパスワードが違います。")
+            else:
+                try:
+                    # コードは1回しか使えないので、パスワードの設定だけやり直すときは確かめ直さない
+                    if not ss.get("pw_verified"):
+                        store.verify_password_reset(ss.pw_email, code.strip())
+                        ss.pw_verified = True
+                    store.set_new_password(pw)
+                except Exception as e:  # noqa: BLE001
+                    if not ss.get("pw_verified"):
+                        st.error("確認コードが違うか、期限が切れています。もう一度確かめるか、コードを送り直してください。")
+                    else:
+                        # コードは確認済みなので、コードの欄を消して出し直す
+                        ss.pw_error = ("今までと違うパスワードにしてください。" if "different" in str(e).lower() else
+                                       "パスワードを変更できませんでした。もう少し長く、推測されにくいものにしてください。")
+                        st.rerun()
+                else:
+                    end_password_reset()
+                    ss.remember = keep
+                    ss.flash = "パスワードを変更しました"
+                    st.rerun()
+        if not ss.get("pw_verified"):
+            st.button("コードを送り直す", key="pw_resend", type="tertiary", on_click=start_password_reset)
+    st.button("ログインに戻る", key="pw_back", type="tertiary", on_click=end_password_reset)
+
+
 # ---------- ログイン ----------
 if USE_DB and not store.user():
     if ss.pop("clear_cookie", False):
@@ -180,10 +261,14 @@ if USE_DB and not store.user():
         st.success(f"{ss.signup_sent} に確認メールを送りました。メールのリンクを開いてから、ここでログインしてください。")
     if ss.pop("goto_login", False) or "auth_mode" not in ss:
         ss.auth_mode = "ログイン"
-    mode = st.segmented_control("ログインか新規登録", ["ログイン", "新規登録"], key="auth_mode",
-                                label_visibility="collapsed") or "ログイン"
+    mode = "ログイン"
+    if not ss.get("pw_reset"):
+        mode = st.segmented_control("ログインか新規登録", ["ログイン", "新規登録"], key="auth_mode",
+                                    label_visibility="collapsed") or "ログイン"
     keep_help = "この端末では、次から開いたときにログインしなくてすみます。共用の端末ではオフにしてください。"
-    if mode == "ログイン":
+    if ss.get("pw_reset"):
+        password_reset_view(keep_help)
+    elif mode == "ログイン":
         with st.form("login"):
             email = st.text_input("メールアドレス", autocomplete="email")
             pw = st.text_input("パスワード", type="password", autocomplete="current-password")
@@ -201,6 +286,7 @@ if USE_DB and not store.user():
                 ss.remember = keep
                 ss.pop("signup_sent", None)
                 st.rerun()
+        st.button("パスワードを忘れた場合", key="pw_forgot", type="tertiary", on_click=start_password_reset)
     else:
         st.caption("はじめて使う方は、メールアドレスとパスワードを登録してください。"
                    "パートナーも、それぞれ自分のアカウントを登録します。")

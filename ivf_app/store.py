@@ -34,7 +34,7 @@ def _client():
         # Cookie に保存した古いトークンで次回ログインし直せなくなるため。
         # 更新は操作のたびに _fresh() で行い、app.py の sync_cookie() が Cookie を書き換える。
         st.session_state.sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"],
-                                            options=ClientOptions(auto_refresh_token=False))
+                                            options=ClientOptions(auto_refresh_token=False, flow_type="implicit"))
     return st.session_state.sb
 
 
@@ -62,6 +62,22 @@ def sign_up(email: str, password: str, redirect_to: str | None = None) -> bool:
         return False
     _set_user(res.user)
     return True
+
+
+def send_password_reset(email: str) -> None:
+    """パスワード再設定の確認コードをメールで送る。"""
+    _client().auth.reset_password_for_email(email)
+
+
+def verify_password_reset(email: str, code: str) -> None:
+    """確認コードを確かめる。合っていれば、新しいパスワードを設定できる状態になる。"""
+    _client().auth.verify_otp({"email": email, "token": code, "type": "recovery"})
+
+
+def set_new_password(password: str) -> None:
+    """新しいパスワードを設定して、そのままログインする。"""
+    res = _client().auth.update_user({"password": password})
+    _set_user(res.user)
 
 
 def restore(refresh_token: str) -> bool:
