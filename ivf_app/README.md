@@ -1,7 +1,7 @@
 # 体外受精スケジュール（Streamlit + Supabase）
 
 通院・採卵・移植の予定を条件から作り、表やフォームで手直しして、月カレンダーで見るアプリです。
-予定は Supabase に保存され、ログインした本人だけが読み書きできます。
+予定は Supabase に保存され、合言葉を知っている人だけが読み書きできます。メールアドレスとパスワードはいりません。
 
 ## できること
 
@@ -16,28 +16,26 @@
 
 1. https://supabase.com でプロジェクトを作る（リージョンは Tokyo がおすすめ）
 2. 左メニュー **SQL Editor** → `supabase/schema.sql` の中身を貼って **Run**
-3. **Authentication → Sign In / Providers** で **Allow new users to sign up をオン**、**Confirm email もオン**（アプリの「新規登録」から誰でも登録でき、メールの確認後に使えるようになる）
-4. **Authentication → URL Configuration** の **Site URL** に、公開したアプリの URL（例：`https://xxxx.streamlit.app`）を入れる（確認メールのリンクの戻り先）
-   - Supabase 標準のメール送信は1時間あたりの通数が少ないので、利用者が増えたら **Authentication → Emails → SMTP Settings** で独自のメール送信を設定する
-5. **Project Settings → API Keys** で、次の2つを控える
+3. **Authentication → Sign In / Providers** で **Allow anonymous sign-ins をオン**（端末ごとに匿名でサインインし、合言葉で共有スペースに入る）
+4. **Project Settings → API Keys** で、次の2つを控える
    - Project URL（`https://xxxx.supabase.co`）
    - **anon** キー（Legacy API Keys のタブにある `eyJ...` で始まるもの）
    - ※ `service_role` / secret キーは絶対に使わない
    - 新しい publishable key（`sb_publishable_...`）でも動きます
 
-5. **Authentication → Emails → Reset Password** の本文に、確認コード `{{ .Token }}` を入れる（アプリの「パスワードを忘れた場合」は、このコードを画面に入力する方式）
-6. 自分以外の人にもメールを届けるには **Authentication → Emails → SMTP Settings** で独自のメール送信を設定する。Supabase 標準のメール送信は、組織のチームメンバーのアドレスにしか届かず、通数も少ない（新規登録の確認メールも同じ）
-
 > アプリを更新して `schema.sql` が変わったときは、同じように SQL Editor で最新の中身を貼って Run します（何度実行しても大丈夫です）。
 
 ### パートナーとの共有
 
-0. 2人ともアプリの「新規登録」でアカウントを作る
-1. 片方がログインし、「新しく始める」で暗証番号（数字4〜12桁）を決める
-2. もう片方が自分のアカウントでログインし、「パートナーに参加する」で相手のメールアドレスと暗証番号を入力する
+1. 片方が「新しく始める」で合言葉（8文字以上）を決める
+2. もう片方が「合言葉で入る」に同じ合言葉を入れる
 3. 以後、2人とも同じ予定を見て、どちらからでも直せます。同時に直した場合は、後から保存した側に「最新を読み込みました」と出て、上書きはされません
 
-ログイン画面の「ログインしたままにする」をオンにすると、その端末では30日間ログインせずに開けます。
+「この端末で覚えておく」をオンにすると、その端末では合言葉を入れずに開けます（iPhone の Safari では、7日間開かないと入れ直しになることがあります）。
+
+- 合言葉は忘れるとメールでは戻せません。入れたままの端末があれば「保存・共有」タブの「合言葉を変える」で変えられます。変えると、ほかの端末は入り直しになります
+- 以前メールアドレスで使っていた共有スペースは、入口の「以前メールアドレスで使っていた方はこちら」から、作った人のメールアドレスと暗証番号で引き継げます。引き継ぐときに合言葉を決めると、この入口は閉じます
+- 合言葉をまちがえられる回数には上限があります（1人1時間に5回、全体で10分に30回）
 
 ### 2. GitHub
 
@@ -54,7 +52,7 @@
    SUPABASE_KEY = "eyJ...（anonキー）"
    ```
 
-4. **Deploy** → 表示されたURLを Safari で開いてログイン
+4. **Deploy** → 表示されたURLを Safari で開いて合言葉を決める
 
 Secrets を入れないと「お試しモード」（保存なし）で動きます。
 
@@ -72,5 +70,5 @@ streamlit run app.py
 |---|---|
 | `app.py` | 画面 |
 | `schedule.py` | 日程の計算・カレンダー描画・ics/CSV/LINE文面（Streamlitに依存しない） |
-| `store.py` | Supabase のログインと保存 |
+| `store.py` | Supabase への匿名サインイン・合言葉での入室・保存 |
 | `supabase/schema.sql` | テーブル・行レベルセキュリティ・保存用関数 |

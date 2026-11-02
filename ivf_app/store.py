@@ -1,12 +1,14 @@
-"""Supabase への保存・読み込みとログイン。
+"""Supabase への保存・読み込みと、合言葉での入室。
 
 st.secrets に SUPABASE_URL と SUPABASE_KEY（anon / publishable key）があるときだけ使う。
 ない場合はアプリは「保存なしのお試しモード」で動く。
 
-予定は「共有スペース」（ivf_groups）ごとに保存する。パートナーは相手のメールアドレスと
-暗証番号で同じ共有スペースに参加し、同じ予定を見たり直したりできる。
+予定は「共有スペース」（ivf_groups）ごとに保存する。端末ごとに匿名でサインインし、
+同じ合言葉を入れた人が同じ共有スペースに入って、同じ予定を見たり直したりできる。
 """
 from __future__ import annotations
+
+import unicodedata
 
 import pandas as pd
 import streamlit as st
@@ -39,44 +41,16 @@ def _client():
 
 
 def _set_user(u) -> None:
-    st.session_state.sb_user = {"id": u.id, "email": u.email}
+    st.session_state.sb_user = {"id": u.id}
 
 
-def sign_in(email: str, password: str) -> None:
-    res = _client().auth.sign_in_with_password({"email": email, "password": password})
+def _sign_in_anonymously() -> None:
+    """この端末用の匿名ユーザーを用意する（合言葉を送るときに初めて作る）。"""
+    if user():
+        return
+    res = _client().auth.sign_in_anonymously()
     if res.user is None:
-        raise RuntimeError("ログインできませんでした")
-    _set_user(res.user)
-
-
-def sign_up(email: str, password: str, redirect_to: str | None = None) -> bool:
-    """新規登録。そのままログインできたら True、確認メールの確認待ちなら False。"""
-    opts = {"email_redirect_to": redirect_to} if redirect_to else {}
-    res = _client().auth.sign_up({"email": email, "password": password, "options": opts})
-    if res.user is None:
-        raise RuntimeError("登録できませんでした")
-    # すでに登録済みのアドレスだと、確認待ちに見える空のユーザーが返る
-    if not res.user.identities:
-        raise RuntimeError("User already registered")
-    if res.session is None:
-        return False
-    _set_user(res.user)
-    return True
-
-
-def send_password_reset(email: str) -> None:
-    """パスワード再設定の確認コードをメールで送る。"""
-    _client().auth.reset_password_for_email(email)
-
-
-def verify_password_reset(email: str, code: str) -> None:
-    """確認コードを確かめる。合っていれば、新しいパスワードを設定できる状態になる。"""
-    _client().auth.verify_otp({"email": email, "token": code, "type": "recovery"})
-
-
-def set_new_password(password: str) -> None:
-    """新しいパスワードを設定して、そのままログインする。"""
-    res = _client().auth.update_user({"password": password})
+        raise RuntimeError("サインインできませんでした")
     _set_user(res.user)
 
 
@@ -124,19 +98,40 @@ def _fresh():
 
 # ---------- 共有スペース ----------
 
+def normalize_phrase(phrase: str) -> str:
+    """全角・半角、大文字・小文字、空白の違いで入れなくならないようにそろえる。"""
+    return "".join(unicodedata.normalize("NFKC", phrase).split()).casefold()
+
+
 def group_info() -> dict | None:
-    """{"group_id", "version", "owner_email", "members"}。まだ入っていなければ None。"""
+    """{"group_id", "version", "has_phrase"}。まだ入っていなければ None。"""
     _fresh()
     return _client().rpc("ivf_group_info").execute().data
 
 
-def create_group(pin: str) -> None:
+def create_space(phrase: str) -> bool:
+    """合言葉を決めて共有スペースを作る。すでに使われている合言葉なら False。"""
+    _sign_in_anonymously()
     _fresh()
-    _client().rpc("create_ivf_group", {"p_pin": pin}).execute()
+    return bool(_client().rpc("create_ivf_space", {"p_phrase": normalize_phrase(phrase)}).execute().data)
 
 
-def join_group(owner_email: str, pin: str) -> bool:
-    """参加できたら True。メールアドレスか暗証番号が違えば False。"""
+def join_space(phrase: str) -> bool:
+    """合言葉で共有スペースに入る。合わなければ False。"""
+    _sign_in_anonymously()
+    _fresh()
+    return bool(_client().rpc("join_ivf_space", {"p_phrase": normalize_phrase(phrase)}).execute().data)
+
+
+def set_phrase(phrase: str) -> bool:
+    """今の共有スペースの合言葉を決める・変える。すでに使われている合言葉なら False。"""
+    _fresh()
+    return bool(_client().rpc("set_ivf_phrase", {"p_phrase": normalize_phrase(phrase)}).execute().data)
+
+
+def join_old_group(owner_email: str, pin: str) -> bool:
+    """以前の共有スペース（作った人のメールアドレス＋暗証番号）に入る。違えば False。"""
+    _sign_in_anonymously()
     _fresh()
     return bool(_client().rpc("join_ivf_group", {"p_owner_email": owner_email, "p_pin": pin}).execute().data)
 
@@ -164,11 +159,9 @@ def save_events(df: pd.DataFrame, version: int | None) -> int:
 
 def load_params() -> dict | None:
     _fresh()
-    res = _client().table("ivf_settings").select("params").limit(1).execute()
-    return res.data[0]["params"] if res.data else None
+    return _client().rpc("ivf_load_params").execute().data
 
 
 def save_params(p: S.Params) -> None:
     _fresh()
-    u = user()
-    _client().table("ivf_settings").upsert({"user_id": u["id"], "params": S.params_to_dict(p)}).execute()
+    _client().rpc("ivf_save_params", {"p_params": S.params_to_dict(p)}).execute()

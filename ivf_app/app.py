@@ -62,7 +62,7 @@ st.markdown(
     .ivf-bar .ja{font-size:11px;letter-spacing:.32em;color:var(--mute);font-weight:500}
     .ivf-bar .today{font-size:11px;letter-spacing:.12em;color:var(--ink);text-align:right;line-height:1.5}
     .ivf-bar .today b{font-family:'Cormorant Garamond',serif;font-weight:400;font-size:22px;letter-spacing:0;display:block}
-    /* ログイン後は1行の小さな見出しにして、カレンダーを広く見せる */
+    /* 入ったあとは1行の小さな見出しにして、カレンダーを広く見せる */
     .ivf-bar.compact{display:flex;justify-content:space-between;align-items:flex-end;margin:0 0 8px;padding-bottom:6px}
     .ivf-bar.compact .logo{font-size:30px;line-height:1}
     .ivf-bar.compact .ja{font-size:9px;letter-spacing:.3em;margin-top:3px}
@@ -127,7 +127,7 @@ def bar(compact=True):
             f'<div class="ja">体外受精スケジュール</div></div>{today}</div>',
             unsafe_allow_html=True,
         )
-    else:  # ログイン画面は表紙のように大きく
+    else:  # 合言葉の画面は表紙のように大きく
         st.markdown(
             '<div class="ivf-bar"><div class="logo">IVF <em>schedule</em></div>'
             f'<div class="meta"><div class="ja">体外受精スケジュール</div>{today}</div></div>',
@@ -140,7 +140,7 @@ def heading(title, sub=None):
                 unsafe_allow_html=True)
 
 
-# ---------- ログインの保持（リフレッシュトークンを Cookie に入れておく） ----------
+# ---------- 端末での保持（リフレッシュトークンを Cookie に入れておく） ----------
 COOKIE = "ivf_rt"
 KEEP_DAYS = 30
 
@@ -153,7 +153,7 @@ def write_cookie(value, max_age):
 
 
 def sync_cookie():
-    """「ログインしたままにする」なら、最新のトークンを Cookie に入れ直す（トークンは更新のたびに変わる）。"""
+    """「この端末で覚えておく」なら、最新のトークンを Cookie に入れ直す（トークンは更新のたびに変わる）。"""
     if not (USE_DB and ss.get("remember") and store.user()):
         return
     rt = store.refresh_token()
@@ -171,230 +171,183 @@ if USE_DB and not store.user() and not ss.get("restore_tried"):
         else:
             ss.clear_cookie = True
 
-# ---------- パスワードの再設定 ----------
-def start_password_reset():
-    ss.pw_reset = "email"
+# ---------- 合言葉 ----------
+PHRASE_MIN = 8
+PHRASE_HELP = "8文字以上。誕生日や単語1つなど、推測されやすいものは避けてください。忘れると元に戻せないので、メモに残しておいてください。"
+KEEP_LABEL = f"この端末で覚えておく（{KEEP_DAYS}日間）"
+KEEP_HELP = "次から合言葉を入れずに開けます。共用の端末ではオフにしてください。"
 
 
-def end_password_reset():
-    for k in ("pw_reset", "pw_email", "pw_verified"):
-        ss.pop(k, None)
+def phrase_error(phrase, phrase2):
+    if len(store.normalize_phrase(phrase)) < PHRASE_MIN:
+        return f"合言葉は{PHRASE_MIN}文字以上にしてください。"
+    if store.normalize_phrase(phrase) != store.normalize_phrase(phrase2):
+        return "2回入力した合言葉が違います。"
+    return None
 
 
-def password_reset_view(keep_help):
-    """メールで届いた確認コードを入れて、新しいパスワードを決める。"""
-    heading("パスワードの再設定")
-    if ss.pw_reset == "email":
-        st.caption("登録したメールアドレスに、確認コードをお送りします。")
-        with st.form("pw_email_form"):
-            email = st.text_input("メールアドレス", autocomplete="email")
-            sent = st.form_submit_button("確認コードを送る", type="primary", width="stretch")
-        if sent:
-            email = email.strip()
-            if "@" not in email:
-                st.error("メールアドレスを確認してください。")
-            else:
-                try:
-                    store.send_password_reset(email)
-                except Exception as e:  # noqa: BLE001
-                    msg = str(e).lower()
-                    if "rate limit" in msg or "security purposes" in msg:
-                        st.error("短い時間に何度も送っています。しばらくたってからもう一度試してください。")
-                    elif "not authorized" in msg:
-                        st.error("いまはこのメールアドレスにメールを送れません。アプリの管理者に連絡してください。")
-                    else:
-                        st.error(f"メールを送れませんでした。（{e}）")
-                else:
-                    ss.pw_email = email
-                    ss.pw_reset = "code"
-                    st.rerun()
-    else:
-        if ss.get("pw_verified"):
-            st.caption("確認コードは確認できました。新しいパスワードを入れてください。")
-        else:
-            st.caption(f"{ss.pw_email} が登録されていれば、確認コードが届きます。迷惑メールのフォルダも見てください。")
-        if ss.get("pw_error"):
-            st.error(ss.pop("pw_error"))
-        with st.form("pw_code_form"):
-            if not ss.get("pw_verified"):
-                code = st.text_input("確認コード（メールに書かれた数字）", max_chars=10, autocomplete="one-time-code")
-            pw = st.text_input("新しいパスワード（8文字以上）", type="password", autocomplete="new-password")
-            pw2 = st.text_input("新しいパスワード（もう一度）", type="password", autocomplete="new-password")
-            keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True, help=keep_help)
-            ok = st.form_submit_button("パスワードを変更する", type="primary", width="stretch")
-        if ok:
-            if len(pw) < 8:
-                st.error("パスワードは8文字以上にしてください。")
-            elif pw != pw2:
-                st.error("2回入力したパスワードが違います。")
-            else:
-                try:
-                    # コードは1回しか使えないので、パスワードの設定だけやり直すときは確かめ直さない
-                    if not ss.get("pw_verified"):
-                        store.verify_password_reset(ss.pw_email, code.strip())
-                        ss.pw_verified = True
-                    store.set_new_password(pw)
-                except Exception as e:  # noqa: BLE001
-                    if not ss.get("pw_verified"):
-                        st.error("確認コードが違うか、期限が切れています。もう一度確かめるか、コードを送り直してください。")
-                    else:
-                        # コードは確認済みなので、コードの欄を消して出し直す
-                        ss.pw_error = ("今までと違うパスワードにしてください。" if "different" in str(e).lower() else
-                                       "パスワードを変更できませんでした。もう少し長く、推測されにくいものにしてください。")
-                        st.rerun()
-                else:
-                    end_password_reset()
-                    ss.remember = keep
-                    ss.flash = "パスワードを変更しました"
-                    st.rerun()
-        if not ss.get("pw_verified"):
-            st.button("コードを送り直す", key="pw_resend", type="tertiary", on_click=start_password_reset)
-    st.button("ログインに戻る", key="pw_back", type="tertiary", on_click=end_password_reset)
+def enter_error(e):
+    """合言葉の送信でエラーになったときの画面の文言。"""
+    msg = str(e).lower()
+    if "too many attempts" in msg:
+        return "まちがいが続いたので、しばらくたってからもう一度試してください。"
+    if "rate limit" in msg:
+        return "短い時間にアクセスが集中しています。しばらくたってからもう一度試してください。"
+    if "anonymous" in msg:
+        return "いまは入れません。アプリの管理者に連絡してください。（匿名サインインがオフです）"
+    return f"うまくいきませんでした。少し待ってからもう一度試してください。（{e}）"
 
 
-# ---------- ログイン ----------
-if USE_DB and not store.user():
-    if ss.pop("clear_cookie", False):
-        write_cookie("", 0)
+def entered(keep, flash):
+    ss.remember = keep
+    ss.pop("group", None)
+    ss.pop("phrase_old", None)
+    ss.pop("phrase_notice", None)
+    ss.flash = flash
+    st.rerun()
+
+
+def phrase_view():
+    """合言葉で入る画面。メールアドレスもパスワードもいらない。"""
     bar(compact=False)
-    if ss.get("signup_sent"):
-        st.success(f"{ss.signup_sent} に確認メールを送りました。メールのリンクを開いてから、ここでログインしてください。")
-    if ss.pop("goto_login", False) or "auth_mode" not in ss:
-        ss.auth_mode = "ログイン"
-    mode = "ログイン"
-    if not ss.get("pw_reset"):
-        mode = st.segmented_control("ログインか新規登録", ["ログイン", "新規登録"], key="auth_mode",
-                                    label_visibility="collapsed") or "ログイン"
-    keep_help = "この端末では、次から開いたときにログインしなくてすみます。共用の端末ではオフにしてください。"
-    if ss.get("pw_reset"):
-        password_reset_view(keep_help)
-    elif mode == "ログイン":
-        with st.form("login"):
-            email = st.text_input("メールアドレス", autocomplete="email")
-            pw = st.text_input("パスワード", type="password", autocomplete="current-password")
-            keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True, help=keep_help)
-            ok = st.form_submit_button("ログイン", type="primary", width="stretch")
+    if ss.get("phrase_notice"):
+        st.info(ss.phrase_notice)
+    if ss.get("phrase_old"):
+        heading("以前の予定を引き継ぐ", "メールアドレスで使っていた方は、共有スペースを作った人のメールアドレスと暗証番号を入れてください。"
+                                     "このあと、新しい合言葉を決めます。")
+        with st.form("old_form"):
+            owner = st.text_input("共有スペースを作った人のメールアドレス", autocomplete="email")
+            pin = st.text_input("暗証番号", type="password", max_chars=12, autocomplete="off")
+            keep = st.checkbox(KEEP_LABEL, value=True, help=KEEP_HELP)
+            ok = st.form_submit_button("引き継ぐ", type="primary", width="stretch")
         if ok:
+            joined = False
             try:
-                store.sign_in(email.strip(), pw)
+                joined = store.join_old_group(owner.strip(), pin)
             except Exception as e:  # noqa: BLE001
-                if "not confirmed" in str(e).lower():
-                    st.error("メールアドレスの確認がまだです。届いた確認メールのリンクを開いてから、もう一度ログインしてください。")
-                else:
-                    st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
+                st.error(enter_error(e))
             else:
-                ss.remember = keep
-                ss.pop("signup_sent", None)
-                st.rerun()
-        st.button("パスワードを忘れた場合", key="pw_forgot", type="tertiary", on_click=start_password_reset)
-    else:
-        st.caption("はじめて使う方は、メールアドレスとパスワードを登録してください。"
-                   "パートナーも、それぞれ自分のアカウントを登録します。")
-        with st.form("signup"):
-            email = st.text_input("メールアドレス", autocomplete="email")
-            pw = st.text_input("パスワード（8文字以上）", type="password", autocomplete="new-password")
-            pw2 = st.text_input("パスワード（もう一度）", type="password", autocomplete="new-password")
-            keep = st.checkbox(f"ログインしたままにする（{KEEP_DAYS}日間）", value=True, help=keep_help)
-            st.caption("このアプリの日付は目安です。実際の予定はクリニックの指示に従ってください。")
-            ok = st.form_submit_button("登録する", type="primary", width="stretch")
+                if not joined:
+                    st.error("メールアドレスか暗証番号が違うか、すでに引き継ぎが終わっています。")
+            if joined:
+                entered(keep, "以前の予定を引き継ぎました")
+        if st.button("合言葉の画面に戻る", key="old_back", type="tertiary"):
+            ss.pop("phrase_old", None)
+            st.rerun()
+        return
+    how = st.segmented_control("合言葉で入るか新しく始めるか", ["合言葉で入る", "新しく始める"], default="合言葉で入る",
+                               key="phrase_how", label_visibility="collapsed") or "合言葉で入る"
+    if how == "合言葉で入る":
+        with st.form("enter_form"):
+            phrase = st.text_input("合言葉", type="password", autocomplete="off")
+            keep = st.checkbox(KEEP_LABEL, value=True, help=KEEP_HELP)
+            ok = st.form_submit_button("入る", type="primary", width="stretch")
         if ok:
-            email = email.strip()
-            if "@" not in email:
-                st.error("メールアドレスを確認してください。")
-            elif len(pw) < 8:
-                st.error("パスワードは8文字以上にしてください。")
-            elif pw != pw2:
-                st.error("2回入力したパスワードが違います。")
+            joined = False
+            if len(store.normalize_phrase(phrase)) < PHRASE_MIN:
+                st.error("合言葉が違います。")
             else:
                 try:
-                    logged_in = store.sign_up(email, pw, st.context.url)
+                    joined = store.join_space(phrase)
                 except Exception as e:  # noqa: BLE001
-                    msg = str(e).lower()
-                    if "already registered" in msg:
-                        st.error("このメールアドレスはすでに登録されています。「ログイン」から入ってください。")
-                    elif "not allowed" in msg or "disabled" in msg:
-                        st.error("いまは新規登録を受け付けていません。")
-                    elif "rate limit" in msg or "security purposes" in msg:
-                        st.error("短い時間に登録が集中しています。しばらくたってからもう一度試してください。")
-                    elif "password" in msg:
-                        st.error("このパスワードは使えません。もう少し長く、推測されにくいものにしてください。")
-                    else:
-                        st.error(f"登録できませんでした。（{e}）")
+                    st.error(enter_error(e))
                 else:
-                    if logged_in:
-                        ss.remember = keep
-                        ss.flash = "登録しました"
-                    else:
-                        ss.signup_sent = email
-                        ss.goto_login = True
-                    st.rerun()
-    st.stop()
+                    if not joined:
+                        st.error("合言葉が違います。")
+            if joined:
+                entered(keep, "予定を開きました")
+        if st.button("以前メールアドレスで使っていた方はこちら", key="old_open", type="tertiary"):
+            ss.phrase_old = True
+            st.rerun()
+    else:
+        st.caption("2人で使うときは、片方がここで合言葉を決めて、もう片方に伝えてください。")
+        with st.form("create_form"):
+            phrase = st.text_input("合言葉を決める", type="password", autocomplete="off", help=PHRASE_HELP)
+            phrase2 = st.text_input("もう一度入力", type="password", autocomplete="off")
+            keep = st.checkbox(KEEP_LABEL, value=True, help=KEEP_HELP)
+            st.caption("このアプリの日付は目安です。実際の予定はクリニックの指示に従ってください。")
+            ok = st.form_submit_button("始める", type="primary", width="stretch")
+        if ok:
+            err = phrase_error(phrase, phrase2)
+            created = False
+            if err:
+                st.error(err)
+            else:
+                try:
+                    created = store.create_space(phrase)
+                except Exception as e:  # noqa: BLE001
+                    st.error(enter_error(e))
+                else:
+                    if not created:
+                        st.error("この合言葉は使えません。別の合言葉にしてください。")
+            if created:
+                entered(keep, "はじめました")
 
-sync_cookie()
+
+def set_phrase_form(key, title, sub, button):
+    """今の共有スペースの合言葉を決める・変えるフォーム。決められたら True。"""
+    heading(title, sub)
+    with st.form(key):
+        phrase = st.text_input("新しい合言葉", type="password", autocomplete="off", help=PHRASE_HELP)
+        phrase2 = st.text_input("もう一度入力", type="password", autocomplete="off")
+        ok = st.form_submit_button(button, type="primary", width="stretch")
+    if not ok:
+        return False
+    err = phrase_error(phrase, phrase2)
+    if err:
+        st.error(err)
+        return False
+    try:
+        if store.set_phrase(phrase):
+            return True
+    except Exception as e:  # noqa: BLE001
+        st.error(enter_error(e))
+        return False
+    st.error("この合言葉は使えません。別の合言葉にしてください。")
+    return False
 
 
-def logout_button(key="logout"):
-    if st.button("ログアウト", icon=":material/logout:", key=key):
+def back_to_phrase():
+    """パートナーが合言葉を変えて共有スペースから外れたら、合言葉の画面に戻す。"""
+    for k in ("group", "base", "events", "saved", "version"):
+        ss.pop(k, None)
+    ss.phrase_notice = "合言葉が変更されました。新しい合言葉で入り直してください。"
+    st.rerun()
+
+
+def leave_button(key="leave"):
+    if st.button("この端末から抜ける", icon=":material/logout:", key=key):
         store.sign_out()
         ss.restore_tried = True
         ss.clear_cookie = True
         st.rerun()
 
 
-# ---------- 共有スペース（パートナーと同じ予定を見る） ----------
-if USE_DB and "group" not in ss:
+if USE_DB and store.user() and "group" not in ss:
     try:
         ss.group = store.group_info()
     except Exception as e:  # noqa: BLE001
         st.error(f"共有の設定を読み込めませんでした。schema.sql を最新にしたか確認してください。（{e}）")
         st.stop()
 
-if USE_DB and not ss.group:
+if USE_DB and not (store.user() and ss.group):
+    if ss.pop("clear_cookie", False):
+        write_cookie("", 0)
+    phrase_view()
+    st.stop()
+
+sync_cookie()
+
+# 以前の共有スペースには合言葉がまだないので、ここで決める
+if USE_DB and not ss.group.get("has_phrase"):
     bar()
     with st.container(border=True):
-        heading("パートナーと予定を共有する",
-                "はじめに1回だけ設定します。片方が「新しく始める」で暗証番号を決め、"
-                "もう片方が「パートナーに参加する」で相手のメールアドレスと暗証番号を入れると、"
-                "2人で同じ予定を見て、どちらからでも直せるようになります。")
-        how = st.segmented_control("どちらにしますか", ["新しく始める", "パートナーに参加する"],
-                                   default="新しく始める", key="g_how") or "新しく始める"
-        if how == "新しく始める":
-            pin = st.text_input("暗証番号を決める（数字4〜12桁）", type="password", max_chars=12, key="g_pin")
-            pin2 = st.text_input("もう一度入力", type="password", max_chars=12, key="g_pin2")
-            st.caption("パートナーが参加するときに、あなたのメールアドレスと一緒に入力します。"
-                       "今までに作った予定は、この共有スペースに引き継がれます。")
-            if st.button("共有スペースを作る", type="primary", width="stretch"):
-                if not (pin.isdigit() and 4 <= len(pin) <= 12):
-                    st.error("暗証番号は数字4〜12桁にしてください。")
-                elif pin != pin2:
-                    st.error("2回入力した暗証番号が違います。")
-                else:
-                    try:
-                        store.create_group(pin)
-                    except Exception as e:  # noqa: BLE001
-                        st.error(f"作れませんでした。（{e}）")
-                    else:
-                        ss.pop("group", None)
-                        ss.flash = "共有スペースを作りました"
-                        st.rerun()
-        else:
-            owner = st.text_input("パートナーのメールアドレス", key="g_owner")
-            pin = st.text_input("パートナーが決めた暗証番号", type="password", max_chars=12, key="g_jpin")
-            if st.button("参加する", type="primary", width="stretch"):
-                try:
-                    joined = store.join_group(owner.strip(), pin)
-                except Exception as e:  # noqa: BLE001
-                    if "too many attempts" in str(e):
-                        st.error("まちがいが続いたので、1時間ほどたってからもう一度試してください。")
-                    else:
-                        st.error(f"参加できませんでした。（{e}）")
-                else:
-                    if joined:
-                        ss.pop("group", None)
-                        ss.flash = "パートナーの共有スペースに参加しました"
-                        st.rerun()
-                    st.error("メールアドレスか暗証番号が違います。")
-    logout_button("logout_setup")
+        if set_phrase_form("first_phrase", "合言葉を決める",
+                           "これからは、メールアドレスの代わりに合言葉で開きます。パートナーにも伝えてください。", "合言葉を決める"):
+            ss.pop("group", None)
+            ss.flash = "合言葉を決めました"
+            st.rerun()
+    leave_button("leave_setup")
     st.stop()
 
 # ---------- 状態 ----------
@@ -421,6 +374,8 @@ def reload(msg):
     """共有スペースの最新の予定を読み込み直す（パートナーの変更を反映する）。"""
     loaded = store.load_events()
     ss.group = store.group_info()
+    if not ss.group:
+        back_to_phrase()
     ss.version = ss.group["version"]
     ss.saved = loaded
     set_base(loaded, msg)
@@ -577,6 +532,8 @@ with tab_edit:
             # パートナーが先に保存していたら、上書きせずに最新を読み込む
             reload("パートナーが予定を更新していたので、最新の予定を読み込みました。もう一度直してください。")
         except Exception as e:  # noqa: BLE001
+            if "no group" in str(e):
+                back_to_phrase()
             save_status.error(f"保存できませんでした。通信状態を確認して、もう一度操作してください。（{e}）")
         else:
             ss.saved = ev
@@ -783,20 +740,16 @@ with tab_out:
 
     if USE_DB:
         with st.container(border=True):
-            g = ss.group or {}
-            members = g.get("members") or []
             heading("パートナーと共有",
-                    "同じ共有スペースのメンバーは、同じ予定を見て、どちらからでも直せます。"
-                    "相手が直した内容は、開き直すか下のボタンで読み込まれます。")
-            st.markdown("<br>".join(f"・{m}" + ("（作った人）" if m == g.get("owner_email") else "") for m in members),
-                        unsafe_allow_html=True)
-            if len(members) < 2:
-                st.caption(f"パートナーは、自分のアカウントでログインしたあと「パートナーに参加する」を選び、"
-                           f"{g.get('owner_email', '')} と暗証番号を入力してください。")
+                    "同じ合言葉で入った人は、同じ予定を見て、どちらからでも直せます。"
+                    "パートナーには合言葉を伝えてください。相手が直した内容は、開き直すか下のボタンで読み込まれます。")
             if st.button("最新の予定を読み込む", icon=":material/sync:", width="stretch"):
                 reload("最新の予定を読み込みました")
-        u = store.user() or {}
-        st.caption(f"ログイン中：{u.get('email', '')}")
-        logout_button()
+        with st.expander("合言葉を変える"):
+            st.caption("変えると、ほかの端末は新しい合言葉で入り直しになります。")
+            if set_phrase_form("change_phrase", "新しい合言葉", None, "合言葉を変える"):
+                ss.flash = "合言葉を変えました"
+                st.rerun()
+        leave_button()
 
 sync_cookie()

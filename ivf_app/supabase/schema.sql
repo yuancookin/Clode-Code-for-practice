@@ -39,12 +39,30 @@ create table if not exists public.ivf_events (
 alter table public.ivf_events add column if not exists group_id uuid references public.ivf_groups (id) on delete cascade;
 create index if not exists ivf_events_group_date on public.ivf_events (group_id, date);
 
--- 「作り直す」の条件（1人1行）
+-- 「作り直す」の条件（以前は1人1行。今は共有スペースの params に移した）
 create table if not exists public.ivf_settings (
   user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
   params     jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+-- 合言葉方式：共有スペースは合言葉で見分ける（同じ合言葉のスペースは作れない）
+alter table public.ivf_groups add column if not exists phrase_key text unique;
+alter table public.ivf_groups add column if not exists params jsonb;
+update public.ivf_groups g set params = s.params
+  from public.ivf_settings s
+ where s.user_id = g.owner_id and g.params is null;
+
+-- 端末ごとの匿名ユーザーを消しても、予定は消えないようにする
+alter table public.ivf_groups alter column owner_id drop not null;
+alter table public.ivf_groups alter column pin_hash drop not null;
+alter table public.ivf_groups drop constraint if exists ivf_groups_owner_id_fkey;
+alter table public.ivf_groups add constraint ivf_groups_owner_id_fkey
+  foreign key (owner_id) references auth.users (id) on delete set null;
+alter table public.ivf_events alter column user_id drop not null;
+alter table public.ivf_events drop constraint if exists ivf_events_user_id_fkey;
+alter table public.ivf_events add constraint ivf_events_user_id_fkey
+  foreign key (user_id) references auth.users (id) on delete set null;
 
 -- 自分が入っている共有スペース
 create or replace function public.ivf_my_group()
@@ -81,7 +99,7 @@ create policy "own settings" on public.ivf_settings
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 
--- 共有スペースの情報（メンバーのメールアドレスと版番号）。入っていなければ null
+-- 共有スペースの情報（版番号と、合言葉が決まっているか）。入っていなければ null
 create or replace function public.ivf_group_info()
 returns jsonb
 language sql stable
@@ -91,37 +109,112 @@ as $$
   select jsonb_build_object(
            'group_id', g.id,
            'version', g.version,
-           'owner_email', (select email from auth.users where id = g.owner_id),
-           'members', (select jsonb_agg(u.email order by m.joined_at)
-                         from public.ivf_members m join auth.users u on u.id = m.user_id
-                        where m.group_id = g.id))
+           'has_phrase', g.phrase_key is not null)
     from public.ivf_groups g
    where g.id = public.ivf_my_group()
 $$;
 
--- 共有スペースを新しく作る（暗証番号を決める）。今までの自分の予定はそこへ移す
-create or replace function public.create_ivf_group(p_pin text)
-returns uuid
+-- 合言葉は同じハッシュで探せるようにしておく（本文は保存しない）
+create or replace function public.ivf_phrase_key(p_phrase text)
+returns text
+language sql immutable
+set search_path = public
+as $$
+  select encode(extensions.digest('ivf-phrase:' || p_phrase, 'sha256'), 'hex')
+$$;
+
+-- 総当たり対策。匿名ユーザーは作り直せるので、1人ごとの回数に加えて全体の回数も見る
+create or replace function public.ivf_check_attempts()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  delete from public.ivf_join_attempts where at < now() - interval '1 day';
+  if (select count(*) from public.ivf_join_attempts
+       where user_id = auth.uid() and at > now() - interval '1 hour') >= 5
+     or (select count(*) from public.ivf_join_attempts
+          where at > now() - interval '10 minutes') >= 30 then
+    raise exception 'too many attempts';
+  end if;
+end;
+$$;
+
+-- 合言葉を決めて共有スペースを作る。すでに使われている合言葉なら false
+create or replace function public.create_ivf_space(p_phrase text)
+returns boolean
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare g uuid;
 begin
-  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform public.ivf_check_attempts();
   if public.ivf_my_group() is not null then raise exception 'already in a group'; end if;
-  if p_pin !~ '^[0-9]{4,12}$' then raise exception 'pin must be 4-12 digits'; end if;
-  insert into public.ivf_groups (owner_id, pin_hash)
-  values (auth.uid(), extensions.crypt(p_pin, extensions.gen_salt('bf')))
+  if char_length(p_phrase) < 8 then raise exception 'phrase too short'; end if;
+  insert into public.ivf_groups (owner_id, phrase_key)
+  values (auth.uid(), public.ivf_phrase_key(p_phrase))
+  on conflict (phrase_key) do nothing
   returning id into g;
+  if g is null then
+    insert into public.ivf_join_attempts (user_id) values (auth.uid());
+    return false;
+  end if;
   insert into public.ivf_members (user_id, group_id) values (auth.uid(), g);
-  update public.ivf_events set group_id = g where user_id = auth.uid() and group_id is null;
-  return g;
+  return true;
 end;
 $$;
 
--- パートナーの共有スペースに参加する（相手のメールアドレス＋暗証番号）
--- 合わなければ null を返す。1時間に5回まちがえると、しばらく試せない
+-- 合言葉で共有スペースに入る。合わなければ false
+create or replace function public.join_ivf_space(p_phrase text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare g uuid;
+begin
+  perform public.ivf_check_attempts();
+  if public.ivf_my_group() is not null then raise exception 'already in a group'; end if;
+  select id into g from public.ivf_groups where phrase_key = public.ivf_phrase_key(p_phrase);
+  if g is null then
+    insert into public.ivf_join_attempts (user_id) values (auth.uid());
+    return false;
+  end if;
+  insert into public.ivf_members (user_id, group_id) values (auth.uid(), g);
+  return true;
+end;
+$$;
+
+-- 今の共有スペースの合言葉を決める・変える。ほかの端末は新しい合言葉で入り直す
+-- すでに使われている合言葉なら false
+create or replace function public.set_ivf_phrase(p_phrase text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare g uuid;
+begin
+  perform public.ivf_check_attempts();
+  g := public.ivf_my_group();
+  if g is null then raise exception 'no group'; end if;
+  if char_length(p_phrase) < 8 then raise exception 'phrase too short'; end if;
+  begin
+    update public.ivf_groups set phrase_key = public.ivf_phrase_key(p_phrase), pin_hash = null where id = g;
+  exception when unique_violation then
+    insert into public.ivf_join_attempts (user_id) values (auth.uid());
+    return false;
+  end;
+  delete from public.ivf_members where group_id = g and user_id <> auth.uid();
+  return true;
+end;
+$$;
+
+-- 以前の共有スペースを引き継ぐ（作った人のメールアドレス＋暗証番号）
+-- 合言葉を決めたあとのスペースには、この方法では入れない。合わなければ null
 create or replace function public.join_ivf_group(p_owner_email text, p_pin text)
 returns uuid
 language plpgsql
@@ -130,16 +223,12 @@ set search_path = public
 as $$
 declare g uuid; h text;
 begin
-  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform public.ivf_check_attempts();
   if public.ivf_my_group() is not null then raise exception 'already in a group'; end if;
-  if (select count(*) from public.ivf_join_attempts
-       where user_id = auth.uid() and at > now() - interval '1 hour') >= 5 then
-    raise exception 'too many attempts';
-  end if;
   select gr.id, gr.pin_hash into g, h
     from public.ivf_groups gr join auth.users u on u.id = gr.owner_id
-   where lower(u.email) = lower(trim(p_owner_email));
-  if g is null or h <> extensions.crypt(p_pin, h) then
+   where lower(u.email) = lower(trim(p_owner_email)) and gr.phrase_key is null;
+  if g is null or h is null or h <> extensions.crypt(p_pin, h) then
     insert into public.ivf_join_attempts (user_id) values (auth.uid());
     return null;
   end if;
@@ -147,6 +236,31 @@ begin
   return g;
 end;
 $$;
+
+-- 「作り直す」の条件は共有スペースごとに持つ（入り直しても、パートナーからでも同じ）
+create or replace function public.ivf_load_params()
+returns jsonb
+language sql stable
+security definer
+set search_path = public
+as $$
+  select params from public.ivf_groups where id = public.ivf_my_group()
+$$;
+
+create or replace function public.ivf_save_params(p_params jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.ivf_my_group() is null then raise exception 'no group'; end if;
+  update public.ivf_groups set params = p_params where id = public.ivf_my_group();
+end;
+$$;
+
+-- 暗証番号だけで新しいスペースを作る古い入口は閉じる
+drop function if exists public.create_ivf_group(text);
 
 -- 共有スペースの予定をまるごと置き換える（1回のトランザクション）
 -- p_version が今の版と違えば（＝パートナーが先に保存していたら）エラーにする
@@ -178,11 +292,21 @@ $$;
 
 revoke execute on function public.ivf_my_group()                       from public, anon;
 revoke execute on function public.ivf_group_info()                     from public, anon;
-revoke execute on function public.create_ivf_group(text)               from public, anon;
+revoke execute on function public.ivf_phrase_key(text)                 from public, anon, authenticated;
+revoke execute on function public.ivf_check_attempts()                 from public, anon, authenticated;
+revoke execute on function public.create_ivf_space(text)               from public, anon;
+revoke execute on function public.join_ivf_space(text)                 from public, anon;
+revoke execute on function public.set_ivf_phrase(text)                 from public, anon;
 revoke execute on function public.join_ivf_group(text, text)           from public, anon;
+revoke execute on function public.ivf_load_params()                    from public, anon;
+revoke execute on function public.ivf_save_params(jsonb)               from public, anon;
 revoke execute on function public.replace_ivf_events(jsonb, bigint)    from public, anon;
 grant  execute on function public.ivf_my_group()                       to authenticated;
 grant  execute on function public.ivf_group_info()                     to authenticated;
-grant  execute on function public.create_ivf_group(text)               to authenticated;
+grant  execute on function public.create_ivf_space(text)               to authenticated;
+grant  execute on function public.join_ivf_space(text)                 to authenticated;
+grant  execute on function public.set_ivf_phrase(text)                 to authenticated;
 grant  execute on function public.join_ivf_group(text, text)           to authenticated;
+grant  execute on function public.ivf_load_params()                    to authenticated;
+grant  execute on function public.ivf_save_params(jsonb)               to authenticated;
 grant  execute on function public.replace_ivf_events(jsonb, bigint)    to authenticated;
