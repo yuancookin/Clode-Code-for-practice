@@ -1,5 +1,6 @@
 """体外受精スケジュール（通院予測カレンダー）  —  streamlit run app.py"""
 import calendar
+import importlib
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
@@ -10,6 +11,13 @@ import streamlit as st
 
 import schedule as S
 import store
+
+# Streamlit Cloud はアプリ更新時に app.py 以外を読み直さないことがあるので、ファイルが変わっていたら読み直す
+for _m in (S, store):
+    _t = os.path.getmtime(_m.__file__)
+    if getattr(_m, "_mtime", None) != _t:
+        importlib.reload(_m)
+        _m._mtime = _t
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 st.set_page_config(page_title="体外受精スケジュール", page_icon=os.path.join(HERE, "static", "icon-512.png"),
