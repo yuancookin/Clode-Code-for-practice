@@ -170,14 +170,24 @@ def sync_cookie():
         ss.rt_saved = rt
 
 
+# Streamlit Cloud ではサーバーに Cookie が届かないので、ブラウザ側で読んで Python に渡す
+saved_token = st.components.v2.component("ivf_saved_token", js=f"""
+export default function ({{ setStateValue }}) {{
+  const m = document.cookie.match(/(?:^|;\\s*){COOKIE}=([^;]*)/);
+  setStateValue("token", m ? decodeURIComponent(m[1]) : "");
+}}
+""")
+
 if USE_DB and not store.user() and not ss.get("restore_tried"):
-    ss.restore_tried = True
     rt = st.context.cookies.get(COOKIE)
-    if rt:
-        if store.restore(unquote(rt)):
-            ss.remember = True
-        else:
-            ss.clear_cookie = True
+    rt = unquote(rt) if rt else getattr(saved_token(key="saved_token", on_token_change=lambda: None), "token", None)
+    if rt is not None:  # None はブラウザからの返事待ち（届くと再実行される）
+        ss.restore_tried = True
+        if rt:
+            if store.restore(rt):
+                ss.remember = True
+            else:
+                ss.clear_cookie = True
 
 # ---------- 合言葉 ----------
 PHRASE_MIN = 8
