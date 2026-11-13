@@ -615,12 +615,15 @@ def detail_inputs(p):
         egg_day = d2.number_input("採卵（D何日目の目安）", 10, 20, p.egg_day)
         d3, d4 = st.columns(2)
         transfer_after = d3.number_input("移植（採卵の何日後）", 2, 6, p.transfer_after)
-        test_from = d4.number_input("判定（移植の何日後から）", 5, 14, p.test_from)
-        check_before = st.number_input("最初の卵胞チェック（採卵の何日前）", 3, 8, p.check_before,
+        test_from = d4.number_input("判定（移植の何日後）", 5, 14, p.test_from)
+        d5, d6 = st.columns(2)
+        post_visit = d5.number_input("移植後の通院（移植の何日後）", 0, 9, p.post_visit, help="0なら入れません")
+        check_before = d6.number_input("最初の卵胞チェック（採卵の何日前）", 3, 8, p.check_before,
                                        help="6なら、採卵10/31に対して10/25か26の通院になります")
         include_alt = st.toggle("遅れた場合の予備日も入れる", value=p.include_alt)
     return dict(stim_day=int(stim_day), egg_day=int(egg_day), transfer_after=int(transfer_after),
-                test_from=int(test_from), test_to=int(test_from) + 2, include_alt=bool(include_alt),
+                post_visit=int(post_visit), test_from=int(test_from), test_to=int(test_from),
+                include_alt=bool(include_alt),
                 check_before=int(check_before))
 
 

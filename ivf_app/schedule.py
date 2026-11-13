@@ -45,8 +45,9 @@ class Params:
     stim_day: int = 4  # 誘発開始は D何日目か
     egg_day: int = 14  # 採卵は D何日目か
     transfer_after: int = 5  # 採卵の何日後に移植
-    test_from: int = 7  # 移植の何日後から判定
-    test_to: int = 9
+    post_visit: int = 5  # 移植の何日後に通院（0なら入れない）
+    test_from: int = 10  # 移植の何日後から判定
+    test_to: int = 10
     include_alt: bool = True  # 遅れた場合の予備日を入れる
     check_before: int = 6  # 最初の卵胞チェック通院は採卵の何日前か（その翌日との「どちらか」）
 
@@ -61,6 +62,9 @@ def params_from_dict(d: dict | None) -> Params:
     p = Params()
     if not d:
         return p
+    if "post_visit" not in d:
+        # 移植後の通院がなかった頃の保存内容。判定日は新しい既定（移植10日後）にする
+        d = {k: v for k, v in d.items() if k not in ("test_from", "test_to")}
     for f in fields(Params):
         if f.name not in d:
             continue
@@ -147,6 +151,8 @@ def generate(cycles: pd.DataFrame, p: Params) -> pd.DataFrame:
         if p.include_alt:
             add(tr + timedelta(days=1), "予備日", "移植予備", n)
             add(tr + timedelta(days=2), "予備日", "移植予備", n)
+        if p.post_visit:
+            add(tr + timedelta(days=p.post_visit), "受診・通院", "移植後の通院", n)
         for k in range(p.test_from, p.test_to + 1):
             add(tr + timedelta(days=k), "妊娠判定", f"判定{n}", n)
     return normalize(pd.DataFrame(ev, columns=COLS))
